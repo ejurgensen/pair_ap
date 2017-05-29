@@ -200,7 +200,8 @@ struct SRPVerifier
     
     unsigned char M           [SHA512_DIGEST_LENGTH];
     unsigned char H_AMK       [SHA512_DIGEST_LENGTH];
-    unsigned char session_key [SHA512_DIGEST_LENGTH];
+    unsigned char session_key [2 * SHA512_DIGEST_LENGTH]; // See hash_session_key()
+    int           session_key_len;
 };
 
 
@@ -222,7 +223,8 @@ struct SRPUser
     
     unsigned char M           [SHA512_DIGEST_LENGTH];
     unsigned char H_AMK       [SHA512_DIGEST_LENGTH];
-    unsigned char session_key [SHA512_DIGEST_LENGTH];
+    unsigned char session_key [2 * SHA512_DIGEST_LENGTH]; // See hash_session_key()
+    int           session_key_len;
 };
 
 
@@ -314,6 +316,26 @@ static BIGNUM * H_nn( SRP_HashAlgorithm alg, const BIGNUM * n1, const BIGNUM * n
     return BN_bin2bn(buff, hash_length(alg), NULL);
 }
 
+static BIGNUM * H_nn_pad( SRP_HashAlgorithm alg, const BIGNUM * n1, const BIGNUM * n2 )
+{
+    unsigned char * bin;
+    unsigned char   buff[ SHA512_DIGEST_LENGTH ];
+    int             len_n1 = BN_num_bytes(n1);
+    int             len_n2 = BN_num_bytes(n2);
+    int             nbytes = 2 * len_n1;
+
+    if ((len_n2 < 1) || (len_n2 > len_n1))
+       return 0;
+    bin = (unsigned char *) calloc( 1, nbytes );
+    if (!bin)
+       return 0;
+    BN_bn2bin(n1, bin);
+    BN_bn2bin(n2, bin + nbytes - len_n2);
+    hash( alg, bin, nbytes, buff );
+    free(bin);
+    return BN_bin2bn(buff, hash_length(alg), NULL);
+}
+
 static BIGNUM * H_ns( SRP_HashAlgorithm alg, const BIGNUM * n, const unsigned char * bytes, int len_bytes )
 {
     unsigned char   buff[ SHA512_DIGEST_LENGTH ];
@@ -367,8 +389,39 @@ static void hash_num( SRP_HashAlgorithm alg, const BIGNUM * n, unsigned char * d
     free(bin);
 }
 
+static int hash_session_key( SRP_HashAlgorithm alg, const BIGNUM * n, unsigned char * dest )
+{
+    HashCTX         ctx;
+    unsigned char   fourbytes[4] = { 0 }; // Only Apple knows the reason for this
+    int             nbytes = BN_num_bytes(n);
+    unsigned char * bin    = (unsigned char *) malloc( nbytes );
+    if(!bin)
+       return 0;
+    BN_bn2bin(n, bin);
+
+    hash_init( alg, &ctx );
+
+    hash_update( alg, &ctx, bin, nbytes );
+    hash_update( alg, &ctx, fourbytes, sizeof(fourbytes) );
+
+    hash_final( alg, &ctx, dest );
+
+    fourbytes[3] = 1; // Again, only Apple knows...
+
+    hash_init( alg, &ctx );
+
+    hash_update( alg, &ctx, bin, nbytes );
+    hash_update( alg, &ctx, fourbytes, sizeof(fourbytes) );
+
+    hash_final( alg, &ctx, dest + hash_length(alg) );
+
+    free(bin);
+
+    return (2 * hash_length(alg));
+}
+
 static void calculate_M( SRP_HashAlgorithm alg, NGConstant *ng, unsigned char * dest, const char * I, const BIGNUM * s,
-                         const BIGNUM * A, const BIGNUM * B, const unsigned char * K )
+                         const BIGNUM * A, const BIGNUM * B, const unsigned char * K, int K_len )
 {
     unsigned char H_N[ SHA512_DIGEST_LENGTH ];
     unsigned char H_g[ SHA512_DIGEST_LENGTH ];
@@ -394,12 +447,12 @@ static void calculate_M( SRP_HashAlgorithm alg, NGConstant *ng, unsigned char * 
     update_hash_n( alg, &ctx, s );
     update_hash_n( alg, &ctx, A );
     update_hash_n( alg, &ctx, B );
-    hash_update( alg, &ctx, K, hash_len );
+    hash_update( alg, &ctx, K, K_len );
     
     hash_final( alg, &ctx, dest );
 }
 
-static void calculate_H_AMK( SRP_HashAlgorithm alg, unsigned char *dest, const BIGNUM * A, const unsigned char * M, const unsigned char * K )
+static void calculate_H_AMK( SRP_HashAlgorithm alg, unsigned char *dest, const BIGNUM * A, const unsigned char * M, const unsigned char * K, int K_len )
 {
     HashCTX ctx;
     
@@ -407,7 +460,7 @@ static void calculate_H_AMK( SRP_HashAlgorithm alg, unsigned char *dest, const B
     
     update_hash_n( alg, &ctx, A );
     hash_update( alg, &ctx, M, hash_length(alg) );
-    hash_update( alg, &ctx, K, hash_length(alg) );
+    hash_update( alg, &ctx, K, K_len );
     
     hash_final( alg, &ctx, dest );
 }
@@ -577,7 +630,7 @@ struct SRPVerifier *  srp_verifier_new( SRP_HashAlgorithm alg, SRP_NGType ng_typ
     {
        BN_rand(b, 256, -1, 0);
        
-       k = H_nn(alg, ng->N, ng->g);
+       k = H_nn_pad(alg, ng->N, ng->g);
        
        /* B = kv + g^b */
        BN_mul(tmp1, k, v, ctx);
@@ -591,10 +644,10 @@ struct SRPVerifier *  srp_verifier_new( SRP_HashAlgorithm alg, SRP_NGType ng_typ
        BN_mul(tmp2, A, tmp1, ctx);
        BN_mod_exp(S, tmp2, b, ng->N, ctx);
        
-       hash_num(alg, S, ver->session_key);
+       ver->session_key_len = hash_session_key(alg, S, ver->session_key);
        
-       calculate_M( alg, ng, ver->M, username, s, A, B, ver->session_key );
-       calculate_H_AMK( alg, ver->H_AMK, A, ver->M, ver->session_key );
+       calculate_M( alg, ng, ver->M, username, s, A, B, ver->session_key, ver->session_key_len );
+       calculate_H_AMK( alg, ver->H_AMK, A, ver->M, ver->session_key, ver->session_key_len );
        
        *len_B   = BN_num_bytes(B);
        *bytes_B = malloc( *len_B );
@@ -661,14 +714,14 @@ const char * srp_verifier_get_username( struct SRPVerifier * ver )
 const unsigned char * srp_verifier_get_session_key( struct SRPVerifier * ver, int * key_length )
 {
     if (key_length)
-        *key_length = hash_length( ver->hash_alg );
+        *key_length = ver->session_key_len;
     return ver->session_key;
 }
 
 
 int                   srp_verifier_get_session_key_length( struct SRPVerifier * ver )
 {
-    return hash_length( ver->hash_alg );
+    return ver->session_key_len;
 }
 
 
@@ -786,14 +839,14 @@ const char * srp_user_get_username( struct SRPUser * usr )
 const unsigned char * srp_user_get_session_key( struct SRPUser * usr, int * key_length )
 {
     if (key_length)
-        *key_length = hash_length( usr->hash_alg );
+        *key_length = usr->session_key_len;
     return usr->session_key;
 }
 
 
 int                   srp_user_get_session_key_length( struct SRPUser * usr )
 {
-    return hash_length( usr->hash_alg );
+    return usr->session_key_len;
 }
 
 
@@ -803,9 +856,9 @@ void  srp_user_start_authentication( struct SRPUser * usr, const char ** usernam
                                      const unsigned char ** bytes_A, int * len_A )
 {
     BN_CTX  *ctx  = BN_CTX_new();
-    
+
     BN_rand(usr->a, 256, -1, 0);
-        
+
     BN_mod_exp(usr->A, usr->ng->g, usr->a, usr->ng->N, ctx);
         
     BN_CTX_free(ctx);
@@ -861,7 +914,7 @@ void  srp_user_process_challenge( struct SRPUser * usr,
     if (!x)
        goto cleanup_and_exit;
     
-    k = H_nn(usr->hash_alg, usr->ng->N, usr->ng->g);
+    k = H_nn_pad(usr->hash_alg, usr->ng->N, usr->ng->g);
 
     if (!k)
        goto cleanup_and_exit;
@@ -879,10 +932,10 @@ void  srp_user_process_challenge( struct SRPUser * usr,
         BN_sub(tmp1, B, tmp3);                  /* tmp1 = (B - K*(g^x)) */
         BN_mod_exp(usr->S, tmp1, tmp2, usr->ng->N, ctx);
 
-        hash_num(usr->hash_alg, usr->S, usr->session_key);
+        usr->session_key_len = hash_session_key(usr->hash_alg, usr->S, usr->session_key);
         
-        calculate_M( usr->hash_alg, usr->ng, usr->M, usr->username, s, usr->A, B, usr->session_key );
-        calculate_H_AMK( usr->hash_alg, usr->H_AMK, usr->A, usr->M, usr->session_key );
+        calculate_M( usr->hash_alg, usr->ng, usr->M, usr->username, s, usr->A, B, usr->session_key, usr->session_key_len );
+        calculate_H_AMK( usr->hash_alg, usr->H_AMK, usr->A, usr->M, usr->session_key, usr->session_key_len );
         
         *bytes_M = usr->M;
         if (len_M)

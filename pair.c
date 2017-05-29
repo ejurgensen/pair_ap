@@ -116,12 +116,6 @@ step3_response(struct evrtsp_request *req, void *arg)
   plist_get_data_val(proof, &vctx.M2, &vctx.M2_len); // M2
   printf("- got proof with length %d\n", (int)vctx.M2_len);
 
-  if (srp_user_get_session_key_length(vctx.user) != vctx.M2_len)
-    {
-      printf("Proof from server has unexpected length\n");
-      goto error;
-    }
-
   // Check M2
   srp_user_verify_session(vctx.user, (const unsigned char *)vctx.M2);
   if (!srp_user_is_authenticated(vctx.user))
