@@ -5,12 +5,11 @@
 #include <plist/plist.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
+#include <sodium.h>
 
 #include "verification.h"
 
 #include "csrp/srp.h"
-#include "ed25519/ed25519.h"
-#include "curve25519/curve25519-donna.c" //TODO
 
 #define USERNAME "12:34:56:78:90:AB"
 #define AUTHTAG_LENGTH 16
@@ -156,7 +155,14 @@ encrypt_ctr(unsigned char *ciphertext, unsigned char *plaintext1, int plaintext1
 struct verification_setup_context *
 verification_setup_new(const char *pin)
 {
-  struct verification_setup_context *sctx = calloc(1, sizeof(struct verification_setup_context));
+  struct verification_setup_context *sctx;
+
+  if (sodium_init() == -1)
+    return NULL;
+
+  sctx = calloc(1, sizeof(struct verification_setup_context));
+  if (!sctx)
+    return NULL;
 
   memcpy(sctx->pin, pin, sizeof(sctx->pin));
 
@@ -274,7 +280,7 @@ verification_setup_request3(uint32_t *len, struct verification_setup_context *sc
   if (iv[15] == 0x00 || iv[15] == 0xff)
     printf("- note that value of last byte is %d!\n", iv[15]);
 
-  ed25519_create_keypair(sctx->public_key, sctx->private_key, 0);
+  crypto_sign_keypair(sctx->public_key, sctx->private_key);
 
   *len = encrypt_gcm(encrypted, tag, sctx->public_key, sizeof(sctx->public_key), key, iv, &errmsg);
   if (*len < 1)
@@ -427,12 +433,12 @@ verification_verify_new(const uint8_t *authorisation_key)
 {
   struct verification_verify_context *vctx;
 
+  if (sodium_init() == -1)
+    return NULL;
+
   vctx = calloc(1, sizeof(struct verification_verify_context));
   if (!vctx)
-    {
-      vctx->errmsg = "Verify new context: Out of memory";
-      return NULL;
-    }
+    return NULL;
 
   memcpy(vctx->client_public_key, authorisation_key, sizeof(vctx->client_public_key));
   memcpy(vctx->client_private_key, authorisation_key + sizeof(vctx->client_public_key), sizeof(vctx->client_private_key));
@@ -460,8 +466,14 @@ verification_verify_request1(uint32_t *len, struct verification_verify_context *
 {
   const uint8_t basepoint[32] = {9};
   uint8_t *data;
+  int ret;
 
-  curve25519_donna(vctx->client_eph_public_key, vctx->client_eph_private_key, basepoint);
+  ret = crypto_scalarmult(vctx->client_eph_public_key, vctx->client_eph_private_key, basepoint);
+  if (ret < 0)
+    {
+      vctx->errmsg = "Verify request 1: Curve 25519 returned an error";
+      return NULL;
+    }
 
   *len = 4 + sizeof(vctx->client_eph_public_key) + sizeof(vctx->client_public_key);
   data = calloc(1, *len);
@@ -482,12 +494,13 @@ uint8_t *
 verification_verify_request2(uint32_t *len, struct verification_verify_context *vctx)
 {
   SHA512_CTX sha512;
-  uint8_t shared_secret[32];
+  uint8_t shared_secret[crypto_scalarmult_BYTES];
   uint8_t key[SHA512_DIGEST_LENGTH];
   uint8_t iv[SHA512_DIGEST_LENGTH];
   uint8_t encrypted[128]; // Alloc a bit extra
-  uint8_t signature[64];
+  uint8_t signature[crypto_sign_BYTES];
   uint8_t *data;
+  int ret;
   const char *errmsg;
 
   *len = sizeof(vctx->client_eph_public_key) + sizeof(vctx->server_eph_public_key);
@@ -501,11 +514,16 @@ verification_verify_request2(uint32_t *len, struct verification_verify_context *
   memcpy(data, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key));
   memcpy(data + sizeof(vctx->client_eph_public_key), vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key));
 
-  ed25519_sign(signature, data, *len, vctx->client_public_key, vctx->client_private_key);
+  crypto_sign_detached(signature, NULL, data, *len, vctx->client_private_key);
 
   free(data);
 
-  curve25519_donna(shared_secret, vctx->client_eph_private_key, vctx->server_eph_public_key);
+  ret = crypto_scalarmult(shared_secret, vctx->client_eph_private_key, vctx->server_eph_public_key);
+  if (ret < 0)
+    {
+      vctx->errmsg = "Verify request 2: Curve 25519 returned an error";
+      return NULL;
+    }
 
   SHA512_Init(&sha512);
   SHA512_Update(&sha512, (unsigned char *)AES_VERIFY_KEY, strlen(AES_VERIFY_KEY));

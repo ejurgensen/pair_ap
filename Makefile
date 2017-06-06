@@ -1,7 +1,6 @@
 CC=gcc
 CFLAGS=-Wall
-LIBS=-levent -lplist -lssl -lcrypto
-ED25519_SRC=ed25519/ed25519.c ed25519/fe.c ed25519/sha512.c ed25519/ge.c ed25519/sc.c
+LIBS=-levent -lplist -lssl -lcrypto -lsodium
 
 all:
-	$(CC) $(CFLAGS) example.c verification.c csrp/srp.c evrtsp/rtsp.c $(ED25519_SRC) -o example $(LIBS)
+	$(CC) $(CFLAGS) example.c verification.c csrp/srp.c evrtsp/rtsp.c -o example $(LIBS)
