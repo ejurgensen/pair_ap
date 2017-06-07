@@ -25,6 +25,7 @@ static int cseq;
 static struct verification_verify_context *verify_ctx;
 static struct verification_setup_context *setup_ctx;
 
+
 static int
 response_process(uint8_t **response, struct evrtsp_request *req)
 {
@@ -73,10 +74,10 @@ static void
 verify_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  int len;
+  int ret;
 
-  len = response_process(&response, req);
-  if (len >= 0)
+  ret = response_process(&response, req);
+  if (ret >= 0)
     printf("Verification complete\n");
 
   event_base_loopbreak(evbase);
@@ -104,14 +105,13 @@ static void
 verify_step1_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  int len;
   int ret;
 
-  len = response_process(&response, req);
-  if (len <= 0)
+  ret = response_process(&response, req);
+  if (ret <= 0)
     goto error;
 
-  ret = verification_verify_response1(verify_ctx, response, len);
+  ret = verification_verify_response1(verify_ctx, response, ret);
   if (ret < 0)
     goto error;
 
@@ -164,11 +164,11 @@ setup_step3_response(struct evrtsp_request *req, void *arg)
   uint32_t len;
   int ret;
 
-  len = response_process(&response, req);
-  if (len <= 0)
+  ret = response_process(&response, req);
+  if (ret <= 0)
     goto error;
 
-  ret = verification_setup_response3(setup_ctx, response, len);
+  ret = verification_setup_response3(setup_ctx, response, ret);
   if (ret < 0)
     goto error;
 
@@ -216,14 +216,13 @@ static void
 setup_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  int len;
   int ret;
 
-  len = response_process(&response, req);
-  if (len <= 0)
+  ret = response_process(&response, req);
+  if (ret <= 0)
     goto error;
 
-  ret = verification_setup_response2(setup_ctx, response, len);
+  ret = verification_setup_response2(setup_ctx, response, ret);
   if (ret < 0)
     goto error;
 
@@ -263,14 +262,13 @@ static void
 setup_step1_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  int len;
   int ret;
 
-  len = response_process(&response, req);
-  if (len <= 0)
+  ret = response_process(&response, req);
+  if (ret <= 0)
     goto error;
 
-  ret = verification_setup_response1(setup_ctx, response, len);
+  ret = verification_setup_response1(setup_ctx, response, ret);
   if (ret < 0)
     goto error;
 
@@ -311,8 +309,8 @@ setup_start_response(struct evrtsp_request *req, void *arg)
   size_t len;
   int ret;
 
-  len = response_process(&response, req);
-  if (len < 0)
+  ret = response_process(&response, req);
+  if (ret < 0)
     goto error;
 
   printf ("Enter pin: ");
