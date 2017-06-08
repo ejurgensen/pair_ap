@@ -835,10 +835,7 @@ verification_setup_request2(uint32_t *len, struct verification_setup_context *sc
   srp_user_process_challenge(sctx->user, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
 
   pk = plist_new_data((char *)sctx->pkA, sctx->pkA_len);
-  printf("- made pkA with length %d\n", (int)sctx->pkA_len);
-
   proof = plist_new_data((char *)sctx->M1, sctx->M1_len);
-  printf("- made M1 with length %d\n", (int)sctx->M1_len);
 
   dict = plist_new_dict();
   plist_dict_set_item(dict, "pk", pk);
@@ -887,9 +884,10 @@ verification_setup_request3(uint32_t *len, struct verification_setup_context *sc
     }
 
   iv[15]++; // Magic
+/*
   if (iv[15] == 0x00 || iv[15] == 0xff)
     printf("- note that value of last byte is %d!\n", iv[15]);
-
+*/
   crypto_sign_keypair(sctx->public_key, sctx->private_key);
 
   *len = encrypt_gcm(encrypted, tag, sctx->public_key, sizeof(sctx->public_key), key, iv, &errmsg);
@@ -900,10 +898,7 @@ verification_setup_request3(uint32_t *len, struct verification_setup_context *sc
     }
 
   epk = plist_new_data((char *)encrypted, *len);
-  printf("- made epk with length %d\n", *len);
-
   authtag = plist_new_data((char *)tag, AUTHTAG_LENGTH);
-  printf("- made authtag with length %d\n", AUTHTAG_LENGTH);
 
   dict = plist_new_dict();
   plist_dict_set_item(dict, "epk", epk);
@@ -933,10 +928,7 @@ verification_setup_response1(struct verification_setup_context *sctx, const uint
     }
 
   plist_get_data_val(pk, (char **)&sctx->pkB, &sctx->pkB_len); // B
-  printf("- got pkB with length %d\n", (int)sctx->pkB_len);
-
   plist_get_data_val(salt, (char **)&sctx->salt, &sctx->salt_len);
-  printf("- got salt with length %d\n", (int)sctx->salt_len);
 
   plist_free(dict);
 
@@ -960,7 +952,6 @@ verification_setup_response2(struct verification_setup_context *sctx, const uint
     }
 
   plist_get_data_val(proof, (char **)&sctx->M2, &sctx->M2_len); // M2
-  printf("- got proof with length %d\n", (int)sctx->M2_len);
 
   plist_free(dict);
 
@@ -993,7 +984,6 @@ verification_setup_response3(struct verification_setup_context *sctx, const uint
     }
 
   plist_get_data_val(epk, (char **)&sctx->epk, &sctx->epk_len);
-  printf("- got epk with length %d\n", (int)sctx->epk_len);
 
   authtag = plist_dict_get_item(dict, "authTag");
   if (!authtag)
@@ -1004,7 +994,6 @@ verification_setup_response3(struct verification_setup_context *sctx, const uint
     }
 
   plist_get_data_val(authtag, (char **)&sctx->authtag, &sctx->authtag_len);
-  printf("- got authtag with length %d\n", (int)sctx->authtag_len);
 
   plist_free(dict);
 
@@ -1200,9 +1189,6 @@ verification_verify_response1(struct verification_verify_context *vctx, const ui
 
   memcpy(vctx->server_eph_public_key, data, sizeof(vctx->server_eph_public_key));
   memcpy(vctx->server_public_key, data + sizeof(vctx->server_eph_public_key), sizeof(vctx->server_public_key));
-
-  printf("- got eph_public_key with length %d\n", (int)sizeof(vctx->server_eph_public_key));
-  printf("- got public_key with length %d\n", (int)sizeof(vctx->server_public_key));
 
   return 0;
 }
