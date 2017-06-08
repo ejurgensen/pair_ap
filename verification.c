@@ -439,25 +439,30 @@ calculate_H_AMK(enum hash_alg alg, unsigned char *dest, const BIGNUM * A, const 
   hash_final( alg, &ctx, dest );
 }
 
-static void
+static int
 init_random()
 {    
   FILE *fp = 0;    
   unsigned char buff[64];
+  int ret;
 
   if (srp_initialized)
-    return;
+    return 0;
  
   fp = fopen("/dev/urandom", "r");
-  if (fp)
-    {
-      fread(buff, sizeof(buff), 1, fp);
-      fclose(fp);
-      srp_initialized = 1;
-    }
+  if (!fp)
+    return -1;
 
-  if (srp_initialized)
-    RAND_seed(buff, sizeof(buff));
+  ret = fread(buff, sizeof(buff), 1, fp);
+  fclose(fp);
+  if (ret == 0)
+    return -1;
+
+  RAND_seed(buff, sizeof(buff));
+
+  srp_initialized = 1;
+
+  return 0;
 }
 
 static struct SRPUser *
@@ -471,7 +476,9 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char * username,
   if (!usr)
     goto err_exit;
 
-  init_random(); /* Only happens once */
+  // Only actually does anything the first time
+  if (init_random() < 0)
+    goto err_exit;
     
   usr->alg      = alg;
   usr->ng       = new_ng( ng_type, n_hex, g_hex );
@@ -676,6 +683,8 @@ encrypt_gcm(unsigned char *ciphertext, unsigned char *tag, unsigned char *plaint
   int len;
   int ciphertext_len;
 
+  *errmsg = NULL;
+
   if ( !(ctx = EVP_CIPHER_CTX_new()) ||
        (EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), NULL, NULL, NULL) != 1) ||
        (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, 16, NULL) != 1) ||
@@ -721,6 +730,8 @@ encrypt_ctr(unsigned char *ciphertext, unsigned char *plaintext1, int plaintext1
   EVP_CIPHER_CTX *ctx;
   int ciphertext_len;
   int len;
+
+  *errmsg = NULL;
 
   if ( !(ctx = EVP_CIPHER_CTX_new()) || (EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, key, iv) != 1) )
     {
@@ -890,12 +901,14 @@ verification_setup_request3(uint32_t *len, struct verification_setup_context *sc
 */
   crypto_sign_keypair(sctx->public_key, sctx->private_key);
 
-  *len = encrypt_gcm(encrypted, tag, sctx->public_key, sizeof(sctx->public_key), key, iv, &errmsg);
-  if (*len < 1)
+  ret = encrypt_gcm(encrypted, tag, sctx->public_key, sizeof(sctx->public_key), key, iv, &errmsg);
+  if (ret < 0)
     {
       sctx->errmsg = errmsg;
       return NULL;
     }
+
+  *len = (uint32_t)ret;
 
   epk = plist_new_data((char *)encrypted, *len);
   authtag = plist_new_data((char *)tag, AUTHTAG_LENGTH);
@@ -1155,12 +1168,14 @@ verification_verify_request2(uint32_t *len, struct verification_verify_context *
       return NULL;
     }
 
-  *len = encrypt_ctr(encrypted, vctx->server_public_key, sizeof(vctx->server_public_key), signature, sizeof(signature), key, iv, &errmsg);
-  if (*len < 1)
+  ret = encrypt_ctr(encrypted, vctx->server_public_key, sizeof(vctx->server_public_key), signature, sizeof(signature), key, iv, &errmsg);
+  if (ret < 0)
     {
       vctx->errmsg = errmsg;
       return NULL;
     }
+
+  *len = (uint32_t)ret;
 
   data = calloc(1, 4 + *len);
   if (!data)
