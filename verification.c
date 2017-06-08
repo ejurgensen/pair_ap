@@ -77,9 +77,10 @@ struct verification_setup_context
 
   uint8_t *salt;
   uint64_t salt_len;
-
-  uint8_t public_key[32];
-  uint8_t private_key[64];
+  uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
+  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
+  // Hex-formatet concatenation of public + private, 0-terminated
+  char auth_key[2 * (crypto_sign_PUBLICKEYBYTES + crypto_sign_SECRETKEYBYTES) + 1];
 
   // We don't actually use the server's epk and authtag for anything
   uint8_t *epk;
@@ -95,8 +96,8 @@ struct verification_verify_context
   uint8_t server_eph_public_key[32];
   uint8_t server_public_key[64];
 
-  uint8_t client_public_key[32];
-  uint8_t client_private_key[64];
+  uint8_t client_public_key[crypto_sign_PUBLICKEYBYTES];
+  uint8_t client_private_key[crypto_sign_SECRETKEYBYTES];
 
   uint8_t client_eph_public_key[32];
   uint8_t client_eph_private_key[32];
@@ -1010,37 +1011,41 @@ verification_setup_response3(struct verification_setup_context *sctx, const uint
   return 0;
 }
 
-uint8_t *
-verification_setup_result(uint32_t *len, struct verification_setup_context *sctx)
+int
+verification_setup_result(const char **authorisation_key, struct verification_setup_context *sctx)
 {
   struct verification_verify_context *vctx;
-  uint8_t *authorisation_key;
+  char *ptr;
+  int i;
 
   if (sizeof(vctx->client_public_key) != sizeof(sctx->public_key) || sizeof(vctx->client_private_key) != sizeof(sctx->private_key))
     {
       sctx->errmsg = "Setup result: Bug!";
-      return NULL;
+      return -1;
     }
 
-  *len = sizeof(sctx->public_key) + sizeof(sctx->private_key);
-  authorisation_key = malloc(*len);
-  if (!authorisation_key)
-    {
-      sctx->errmsg = "Setup result: Out of memory";
-      return NULL;
-    }
+  // Fills out the auth_key with public + private in hex. It seems that the private
+  // key actually includes the public key (last 32 bytes), so we could in
+  // principle just export the private key
+  ptr = sctx->auth_key;
+  for (i = 0; i < sizeof(sctx->public_key); i++)
+    ptr += sprintf(ptr, "%02x", sctx->public_key[i]);
+  for (i = 0; i < sizeof(sctx->private_key); i++)
+    ptr += sprintf(ptr, "%02x", sctx->private_key[i]);
+  *ptr = '\0';
 
-  memcpy(authorisation_key, sctx->public_key, sizeof(sctx->public_key));
-  memcpy(authorisation_key + sizeof(sctx->public_key), sctx->private_key, sizeof(sctx->private_key));
-
-  return authorisation_key;
+  *authorisation_key = sctx->auth_key;
+  return 0;
 }
 
 
 struct verification_verify_context *
-verification_verify_new(const uint8_t *authorisation_key)
+verification_verify_new(const char *authorisation_key)
 {
   struct verification_verify_context *vctx;
+  char hex[] = { 0, 0, 0 };
+  const char *ptr;
+  int i;
 
   if (sodium_init() == -1)
     return NULL;
@@ -1049,8 +1054,22 @@ verification_verify_new(const uint8_t *authorisation_key)
   if (!vctx)
     return NULL;
 
-  memcpy(vctx->client_public_key, authorisation_key, sizeof(vctx->client_public_key));
-  memcpy(vctx->client_private_key, authorisation_key + sizeof(vctx->client_public_key), sizeof(vctx->client_private_key));
+  if (strlen(authorisation_key) != 2 * (sizeof(vctx->client_public_key) + sizeof(vctx->client_private_key)))
+    return NULL;
+
+  ptr = authorisation_key;
+  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_public_key[i] = strtol(hex, NULL, 16);
+    }
+  for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_private_key[i] = strtol(hex, NULL, 16);
+    }
 
   return vctx;
 }

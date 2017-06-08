@@ -128,7 +128,7 @@ verify_step1_response(struct evrtsp_request *req, void *arg)
 }
 
 static int
-verify_step1_request(uint8_t *authorisation_key)
+verify_step1_request(const char *authorisation_key)
 {
   uint8_t *request = NULL;
   uint32_t len;
@@ -159,9 +159,8 @@ verify_step1_request(uint8_t *authorisation_key)
 static void
 setup_step3_response(struct evrtsp_request *req, void *arg)
 {
+  const char *authorisation_key;
   uint8_t *response;
-  uint8_t *authorisation_key = NULL;
-  uint32_t len;
   int ret;
 
   ret = response_process(&response, req);
@@ -172,23 +171,21 @@ setup_step3_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  authorisation_key = verification_setup_result(&len, setup_ctx);
-  if (!authorisation_key)
+  ret = verification_setup_result(&authorisation_key, setup_ctx);
+  if (ret < 0)
     goto error;
 
-  printf("Setup complete, got an authorisation key of length %d\n", (int)len);
+  printf("Setup complete, got authorisation key: %s\n", authorisation_key);
 
   ret = verify_step1_request(authorisation_key);
   if (ret < 0)
     goto error;
 
   verification_setup_free(setup_ctx);
-  free(authorisation_key);
 
   return;
 
  error:
-  free(authorisation_key);
   printf("Error: %s\n", verification_setup_errmsg(setup_ctx));
   verification_setup_free(setup_ctx);
   event_base_loopbreak(evbase);

@@ -33,16 +33,20 @@ verification_setup_response2(struct verification_setup_context *sctx, const uint
 int
 verification_setup_response3(struct verification_setup_context *sctx, const uint8_t *data, uint32_t data_len);
 
-uint8_t *
-verification_setup_result(uint32_t *len, struct verification_setup_context *sctx);
+/* Returns a 0-terminated string that is the authorisation key. The caller
+ * should save it and use it later to initialize verification_verify_new().
+ * Note that the pointer becomes invalid when you free sctx.
+ */
+int
+verification_setup_result(const char **authorisation_key, struct verification_setup_context *sctx);
 
 
 /* When you have completed the setup you can extract a key with
- * verification_setup_result(). Give this key as input to this function to
+ * verification_setup_result(). Give the string as input to this function to
  * create a verification context and then call verification_verify_request1()
  */
 struct verification_verify_context *
-verification_verify_new(const uint8_t *authorisation_key);
+verification_verify_new(const char *authorisation_key);
 void
 verification_verify_free(struct verification_verify_context *vctx);
 
