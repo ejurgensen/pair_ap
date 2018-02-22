@@ -294,7 +294,14 @@ hash_init(enum hash_alg alg, HashCTX *c)
         return -1;
     };
 #elif CONFIG_GCRYPT
-  return gcry_md_open(c, alg, 0);
+  gcry_error_t err;
+
+  err = gcry_md_open(c, alg, 0);
+
+  if (err)
+    return -1;
+
+  return 0;
 #endif
 }
 
@@ -785,31 +792,38 @@ encrypt_gcm(unsigned char *ciphertext, int ciphertext_len, unsigned char *tag, u
   return -1;
 #elif CONFIG_GCRYPT
   gcry_cipher_hd_t hd;
-  int ret;
+  gcry_error_t err;
 
-  ret = gcry_cipher_open(&hd, GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_GCM, 0);
-  if (ret < 0)
+  err = gcry_cipher_open(&hd, GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_GCM, 0);
+  if (err)
     {
       *errmsg = "Error initialising AES 128 GCM encryption";
       return -1;
     }
 
-  if ( (gcry_cipher_setkey(hd, key, gcry_cipher_get_algo_keylen(GCRY_CIPHER_AES128)) < 0) ||
-       (gcry_cipher_setiv(hd, iv, gcry_cipher_get_algo_blklen(GCRY_CIPHER_AES128)) < 0))
+  err = gcry_cipher_setkey(hd, key, gcry_cipher_get_algo_keylen(GCRY_CIPHER_AES128));
+  if (err)
     {
-      *errmsg = "Could not set key or iv for AES 128 GCM";
+      *errmsg = "Could not set key for AES 128 GCM";
       goto error;
     }
 
-  ret = gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext, plaintext_len);
-  if (ret < 0)
+  err = gcry_cipher_setiv(hd, iv, gcry_cipher_get_algo_blklen(GCRY_CIPHER_AES128));
+  if (err)
+    {
+      *errmsg = "Could not set iv for AES 128 GCM";
+      goto error;
+    }
+
+  err = gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext, plaintext_len);
+  if (err)
     {
       *errmsg = "Error GCM encrypting";
       goto error;
     }
 
-  ret = gcry_cipher_gettag(hd, tag, AUTHTAG_LENGTH);
-  if (ret < 0)
+  err = gcry_cipher_gettag(hd, tag, AUTHTAG_LENGTH);
+  if (err)
     {
       *errmsg = "Error getting authtag";
       goto error;
@@ -862,24 +876,39 @@ encrypt_ctr(unsigned char *ciphertext, int ciphertext_len,
   return -1;
 #elif CONFIG_GCRYPT
   gcry_cipher_hd_t hd;
+  gcry_error_t err;
 
-  if (gcry_cipher_open(&hd, GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CTR, 0) < 0)
+  err = gcry_cipher_open(&hd, GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CTR, 0);
+  if (err)
     {
       *errmsg = "Error initialising AES 128 CTR encryption";
       return -1;
     }
-
-  if ( (gcry_cipher_setkey(hd, key, gcry_cipher_get_algo_keylen(GCRY_CIPHER_AES128)) < 0) ||
-       (gcry_cipher_setctr(hd, iv, gcry_cipher_get_algo_blklen(GCRY_CIPHER_AES128)) < 0) )
+  err = gcry_cipher_setkey(hd, key, gcry_cipher_get_algo_keylen(GCRY_CIPHER_AES128));
+  if (err)
     {
-      *errmsg = "Could not set key or iv for AES 128 CTR";
+      *errmsg = "Could not set key for AES 128 CTR";
       goto error;
     }
 
-  if ( (gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext1, plaintext1_len) < 0) ||
-       (gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext2, plaintext2_len) < 0) )
+  err = gcry_cipher_setctr(hd, iv, gcry_cipher_get_algo_blklen(GCRY_CIPHER_AES128));
+  if (err)
     {
-      *errmsg = "Error CTR encrypting";
+      *errmsg = "Could not set iv for AES 128 CTR";
+      goto error;
+    }
+
+  err = gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext1, plaintext1_len);
+  if (err)
+    {
+      *errmsg = "Error CTR encrypting plaintext 1";
+      goto error;
+    }
+
+  err = gcry_cipher_encrypt(hd, ciphertext, ciphertext_len, plaintext2, plaintext2_len);
+  if (err)
+    {
+      *errmsg = "Error CTR encrypting plaintext 2";
       goto error;
     }
 
@@ -1333,4 +1362,29 @@ verification_verify_response1(struct verification_verify_context *vctx, const ui
   memcpy(vctx->server_public_key, data + sizeof(vctx->server_eph_public_key), sizeof(vctx->server_public_key));
 
   return 0;
+}
+
+void
+verify_test(void)
+{
+  gcry_sexp_t keyparm, key;
+  gcry_error_t err;
+
+  err = gcry_sexp_build(&keyparm, NULL, "(genkey(ecc(curve %s)(flags param eddsa)))", "Ed25519");
+  if (err)
+    {
+      printf("build failed\n");
+      return;
+    }
+
+  err = gcry_pk_genkey(&key, keyparm);
+  if (err)
+    {
+      printf("genkey failed\n");
+      return;
+    }
+
+  gcry_sexp_dump(key);
+
+  printf("All done\n");
 }
