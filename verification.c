@@ -1363,28 +1363,3 @@ verification_verify_response1(struct verification_verify_context *vctx, const ui
 
   return 0;
 }
-
-void
-verify_test(void)
-{
-  gcry_sexp_t keyparm, key;
-  gcry_error_t err;
-
-  err = gcry_sexp_build(&keyparm, NULL, "(genkey(ecc(curve %s)(flags param eddsa)))", "Ed25519");
-  if (err)
-    {
-      printf("build failed\n");
-      return;
-    }
-
-  err = gcry_pk_genkey(&key, keyparm);
-  if (err)
-    {
-      printf("genkey failed\n");
-      return;
-    }
-
-  gcry_sexp_dump(key);
-
-  printf("All done\n");
-}
