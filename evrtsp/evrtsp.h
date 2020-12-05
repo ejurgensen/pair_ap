@@ -132,6 +132,10 @@ void evrtsp_connection_free(struct evrtsp_connection *evcon);
 void evrtsp_connection_set_closecb(struct evrtsp_connection *evcon,
     void (*)(struct evrtsp_connection *, void *), void *);
 
+/** Set a callback for encryption/decryption. */
+void evrtsp_connection_set_ciphercb(struct evrtsp_connection *evcon,
+    void (*)(struct evbuffer *, void *, int encrypt), void *);
+
 /**
  * Associates an event base with the connection - can only be called
  * on a freshly created connection object that has not been used yet.
