@@ -5,4 +5,4 @@ CFLAGS=-Wall -DCONFIG_GCRYPT  -DDEBUG_PAIR -g
 LIBS=-levent -lplist -lgcrypt -lsodium
 
 all:
-	$(CC) $(CFLAGS) pair-example.c pair.c pair_fruit.c pair_homekit.c tlv.c evrtsp/rtsp.c -o pair-example $(LIBS)
+	$(CC) $(CFLAGS) pair-example.c pair.c pair_fruit.c pair_homekit.c evrtsp/rtsp.c -o pair-example $(LIBS)

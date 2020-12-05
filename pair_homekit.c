@@ -1,9 +1,10 @@
 /*
- *
- * The Secure Remote Password 6a implementation included here is by
+ * The Secure Remote Password 6a implementation is adapted from:
  *  - Tom Cocagne
  *    <https://github.com/cocagne/csrp>
  *
+ * TLV helpers are adapted from ESP homekit:
+ *    <https://github.com/maximkulkin/esp-homekit>
  *
  * The MIT License (MIT)
  * 
@@ -30,12 +31,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include <assert.h>
 
 #include <sodium.h>
 
-#include "tlv.h"
 #include "pair-internal.h"
 
 
@@ -104,7 +105,7 @@ enum pair_method {
 };
 
 
-/* ---------------------------------- SRP ---------------------------------- */
+/* ---------------------------------- SRP ----------------------------------- */
 
 typedef enum
 {
@@ -466,7 +467,242 @@ srp_user_verify_session(struct SRPUser *usr, const unsigned char *bytes_HAMK)
 }
 
 
-/* -------------------------------- HELPERS -------------------------------- */
+/* ---------------------------------- TLV ----------------------------------- */
+
+#define TLV_ERROR_MEMORY -1
+#define TLV_ERROR_INSUFFICIENT_SIZE -2
+
+typedef enum {
+    TLVType_Method = 0,        // (integer) Method to use for pairing. See PairMethod
+    TLVType_Identifier = 1,    // (UTF-8) Identifier for authentication
+    TLVType_Salt = 2,          // (bytes) 16+ bytes of random salt
+    TLVType_PublicKey = 3,     // (bytes) Curve25519, SRP public key or signed Ed25519 key
+    TLVType_Proof = 4,         // (bytes) Ed25519 or SRP proof
+    TLVType_EncryptedData = 5, // (bytes) Encrypted data with auth tag at end
+    TLVType_State = 6,         // (integer) State of the pairing process. 1=M1, 2=M2, etc.
+    TLVType_Error = 7,         // (integer) Error code. Must only be present if error code is
+                               // not 0. See TLVError
+    TLVType_RetryDelay = 8,    // (integer) Seconds to delay until retrying a setup code
+    TLVType_Certificate = 9,   // (bytes) X.509 Certificate
+    TLVType_Signature = 10,    // (bytes) Ed25519
+    TLVType_Permissions = 11,  // (integer) Bit value describing permissions of the controller
+                               // being added.
+                               // None (0x00): Regular user
+                               // Bit 1 (0x01): Admin that is able to add and remove
+                               // pairings against the accessory
+    TLVType_FragmentData = 13, // (bytes) Non-last fragment of data. If length is 0,
+                               // it's an ACK.
+    TLVType_FragmentLast = 14, // (bytes) Last fragment of data
+    TLVType_Separator = 0xff,
+} TLVType;
+
+
+typedef enum {
+  TLVMethod_PairSetup = 1,
+  TLVMethod_PairVerify = 2,
+  TLVMethod_AddPairing = 3,
+  TLVMethod_RemovePairing = 4,
+  TLVMethod_ListPairings = 5,
+} TLVMethod;
+
+
+typedef enum {
+  TLVError_Unknown = 1,         // Generic error to handle unexpected errors
+  TLVError_Authentication = 2,  // Setup code or signature verification failed
+  TLVError_Backoff = 3,         // Client must look at the retry delay TLV item and
+                                // wait that many seconds before retrying
+  TLVError_MaxPeers = 4,        // Server cannot accept any more pairings
+  TLVError_MaxTries = 5,        // Server reached its maximum number of
+                                // authentication attempts
+  TLVError_Unavailable = 6,     // Server pairing method is unavailable
+  TLVError_Busy = 7,            // Server is busy and cannot accept a pairing
+                                // request at this time
+} TLVError;
+
+typedef struct _tlv {
+    struct _tlv *next;
+    uint8_t type;
+    uint8_t *value;
+    size_t size;
+} tlv_t;
+
+
+typedef struct {
+    tlv_t *head;
+} tlv_values_t;
+
+
+static tlv_values_t *
+tlv_new() {
+    tlv_values_t *values = malloc(sizeof(tlv_values_t));
+    if (!values)
+        return NULL;
+
+    values->head = NULL;
+    return values;
+}
+
+static void
+tlv_free(tlv_values_t *values) {
+    tlv_t *t = values->head;
+    while (t) {
+        tlv_t *t2 = t;
+        t = t->next;
+        if (t2->value)
+            free(t2->value);
+        free(t2);
+    }
+    free(values);
+}
+
+static int
+tlv_add_value_(tlv_values_t *values, uint8_t type, uint8_t *value, size_t size) {
+    tlv_t *tlv = malloc(sizeof(tlv_t));
+    if (!tlv) {
+        return TLV_ERROR_MEMORY;
+    }
+    tlv->type = type;
+    tlv->size = size;
+    tlv->value = value;
+    tlv->next = NULL;
+
+    if (!values->head) {
+        values->head = tlv;
+    } else {
+        tlv_t *t = values->head;
+        while (t->next) {
+            t = t->next;
+        }
+        t->next = tlv;
+    }
+
+    return 0;
+}
+
+static int
+tlv_add_value(tlv_values_t *values, uint8_t type, const uint8_t *value, size_t size) {
+    uint8_t *data = NULL;
+    int ret;
+    if (size) {
+        data = malloc(size);
+        if (!data) {
+            return TLV_ERROR_MEMORY;
+        }
+        memcpy(data, value, size);
+    }
+    ret = tlv_add_value_(values, type, data, size);
+    if (ret < 0)
+        free(data);
+    return ret;
+}
+
+static tlv_t *
+tlv_get_value(const tlv_values_t *values, uint8_t type) {
+    tlv_t *t = values->head;
+    while (t) {
+        if (t->type == type)
+            return t;
+        t = t->next;
+    }
+    return NULL;
+}
+
+static int
+tlv_format(const tlv_values_t *values, uint8_t *buffer, size_t *size) {
+    size_t required_size = 0;
+    tlv_t *t = values->head;
+    while (t) {
+        required_size += t->size + 2 * ((t->size + 254) / 255);
+        t = t->next;
+    }
+
+    if (*size < required_size) {
+        *size = required_size;
+        return TLV_ERROR_INSUFFICIENT_SIZE;
+    }
+
+    *size = required_size;
+
+    t = values->head;
+    while (t) {
+        uint8_t *data = t->value;
+        if (!t->size) {
+            buffer[0] = t->type;
+            buffer[1] = 0;
+            buffer += 2;
+            t = t->next;
+            continue;
+        }
+
+        size_t remaining = t->size;
+
+        while (remaining) {
+            buffer[0] = t->type;
+            size_t chunk_size = (remaining > 255) ? 255 : remaining;
+            buffer[1] = chunk_size;
+            memcpy(&buffer[2], data, chunk_size);
+            remaining -= chunk_size;
+            buffer += chunk_size + 2;
+            data += chunk_size;
+        }
+
+        t = t->next;
+    }
+
+    return 0;
+}
+
+static int
+tlv_parse(const uint8_t *buffer, size_t length, tlv_values_t *values) {
+    size_t i = 0;
+    int ret;
+    while (i < length) {
+        uint8_t type = buffer[i];
+        size_t size = 0;
+        uint8_t *data = NULL;
+
+        // scan TLVs to accumulate total size of subsequent TLVs with same type (chunked data)
+        size_t j = i;
+        while (j < length && buffer[j] == type && buffer[j+1] == 255) {
+            size_t chunk_size = buffer[j+1];
+            size += chunk_size;
+            j += chunk_size + 2;
+        }
+        if (j < length && buffer[j] == type) {
+            size_t chunk_size = buffer[j+1];
+            size += chunk_size;
+        }
+
+        // allocate memory to hold all pieces of chunked data and copy data there
+        if (size != 0) {
+            data = malloc(size);
+            if (!data)
+                return TLV_ERROR_MEMORY;
+
+            uint8_t *p = data;
+
+            size_t remaining = size;
+            while (remaining) {
+                size_t chunk_size = buffer[i+1];
+                memcpy(p, &buffer[i+2], chunk_size);
+                p += chunk_size;
+                i += chunk_size + 2;
+                remaining -= chunk_size;
+            }
+        }
+
+        ret = tlv_add_value_(values, type, data, size);
+        if (ret < 0) {
+            free(data);
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+
+/* -------------------------------- HELPERS --------------------------------- */
 
 #ifdef DEBUG_PAIR
 static void

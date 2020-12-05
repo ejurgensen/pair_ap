@@ -1,9 +1,8 @@
 /*
  *
- * The Secure Remote Password 6a implementation included here is by
+ * The Secure Remote Password 6a implementation is adapted from:
  *  - Tom Cocagne
  *    <https://github.com/cocagne/csrp>
- *
  *
  * The MIT License (MIT)
  * 
@@ -721,7 +720,7 @@ pair_setup_request3(uint32_t *len, struct pair_setup_context *sctx)
       return NULL;
     }
 
-  iv[15]++; // Magic
+  iv[15]++; // Nonce?
 /*
   if (iv[15] == 0x00 || iv[15] == 0xff)
     printf("- note that value of last byte is %d!\n", iv[15]);
