@@ -31,76 +31,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <sodium.h>
-
 #include <assert.h>
 
+#include <sodium.h>
+
 #include "tlv.h"
-#include "pair.h"
-
-/* -------------------- GCRYPT AND OPENSSL COMPABILITY --------------------- */
-/*                   partly borrowed from ffmpeg (rtmpdh.c)                  */
-
-#if CONFIG_GCRYPT
-#include <gcrypt.h>
-#define SHA512_DIGEST_LENGTH 64
-#define bnum_new(bn)                                            \
-    do {                                                        \
-        if (!gcry_control(GCRYCTL_INITIALIZATION_FINISHED_P)) { \
-            if (!gcry_check_version("1.5.4"))                   \
-                abort();                                        \
-            gcry_control(GCRYCTL_DISABLE_SECMEM, 0);            \
-            gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);   \
-        }                                                       \
-        bn = gcry_mpi_new(1);                                   \
-    } while (0)
-#define bnum_free(bn)                 gcry_mpi_release(bn)
-#define bnum_num_bytes(bn)            (gcry_mpi_get_nbits(bn) + 7) / 8
-#define bnum_is_zero(bn)              (gcry_mpi_cmp_ui(bn, (unsigned long)0) == 0)
-#define bnum_bn2bin(bn, buf, len)     gcry_mpi_print(GCRYMPI_FMT_USG, buf, len, NULL, bn)
-#define bnum_bin2bn(bn, buf, len)     gcry_mpi_scan(&bn, GCRYMPI_FMT_USG, buf, len, NULL)
-#define bnum_hex2bn(bn, buf)          gcry_mpi_scan(&bn, GCRYMPI_FMT_HEX, buf, 0, 0)
-#define bnum_random(bn, num_bits)     gcry_mpi_randomize(bn, num_bits, GCRY_WEAK_RANDOM)
-#define bnum_add(bn, a, b)            gcry_mpi_add(bn, a, b)
-#define bnum_sub(bn, a, b)            gcry_mpi_sub(bn, a, b)
-#define bnum_mul(bn, a, b)            gcry_mpi_mul(bn, a, b)
-typedef gcry_mpi_t bnum;
-static void bnum_modexp(bnum bn, bnum y, bnum q, bnum p)
-{
-  gcry_mpi_powm(bn, y, q, p);
-}
-#elif CONFIG_OPENSSL
-#include <openssl/crypto.h>
-#include <openssl/bn.h>
-#include <openssl/rand.h>
-#include <openssl/sha.h>
-#include <openssl/evp.h>
-#define bnum_new(bn)                  bn = BN_new()
-#define bnum_free(bn)                 BN_free(bn)
-#define bnum_num_bytes(bn)            BN_num_bytes(bn)
-#define bnum_is_zero(bn)              BN_is_zero(bn)
-#define bnum_bn2bin(bn, buf, len)     BN_bn2bin(bn, buf)
-#define bnum_bin2bn(bn, buf, len)     bn = BN_bin2bn(buf, len, 0)
-#define bnum_hex2bn(bn, buf)          BN_hex2bn(&bn, buf)
-#define bnum_random(bn, num_bits)     BN_rand(bn, num_bits, 0, 0)
-#define bnum_add(bn, a, b)            BN_add(bn, a, b)
-#define bnum_sub(bn, a, b)            BN_sub(bn, a, b)
-typedef BIGNUM* bnum;
-static void bnum_mul(bnum bn, bnum a, bnum b)
-{
-  // No error handling
-  BN_CTX *ctx = BN_CTX_new();
-  BN_mul(bn, a, b, ctx);
-  BN_CTX_free(ctx);
-}
-static void bnum_modexp(bnum bn, bnum y, bnum q, bnum p)
-{
-  // No error handling
-  BN_CTX *ctx = BN_CTX_new();
-  BN_mod_exp(bn, y, q, p, ctx);
-  BN_CTX_free(ctx);
-}
-#endif
+#include "pair-internal.h"
 
 
 /* ----------------------------- DEFINES ETC ------------------------------- */
@@ -168,90 +104,6 @@ enum pair_method {
 };
 
 
-#ifdef CONFIG_OPENSSL
-enum hash_alg
-{
-  HASH_SHA1,
-  HASH_SHA224,
-  HASH_SHA256,
-  HASH_SHA384,
-  HASH_SHA512,
-};
-#elif CONFIG_GCRYPT
-enum hash_alg
-{
-  HASH_SHA1 = GCRY_MD_SHA1,
-  HASH_SHA224 = GCRY_MD_SHA224,
-  HASH_SHA256 = GCRY_MD_SHA256,
-  HASH_SHA384 = GCRY_MD_SHA384,
-  HASH_SHA512 = GCRY_MD_SHA512,
-};
-#endif
-
-struct pair_setup_context
-{
-  struct SRPUser *user;
-
-  char pin[4];
-  char device_id[17]; // Incl. zero term
-
-  const uint8_t *pkA;
-  int pkA_len;
-
-  uint8_t *pkB;
-  uint64_t pkB_len;
-
-  const uint8_t *M1;
-  int M1_len;
-
-  uint8_t *M2;
-  uint64_t M2_len;
-
-  uint8_t *salt;
-  uint64_t salt_len;
-  uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
-  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
-  // Hex-formatet concatenation of public + private, 0-terminated
-  char auth_key[2 * (crypto_sign_PUBLICKEYBYTES + crypto_sign_SECRETKEYBYTES) + 1];
-
-  // We don't actually use the server's epk and authtag for anything
-  uint8_t *epk;
-  uint64_t epk_len;
-  uint8_t *authtag;
-  uint64_t authtag_len;
-
-  const char *errmsg;
-};
-
-struct pair_verify_context
-{
-  char device_id[17]; // Incl. zero term
-
-  uint8_t server_eph_public_key[32];
-  uint8_t server_public_key[64];
-
-  uint8_t client_public_key[crypto_sign_PUBLICKEYBYTES];
-  uint8_t client_private_key[crypto_sign_SECRETKEYBYTES];
-
-  uint8_t client_eph_public_key[32];
-  uint8_t client_eph_private_key[32];
-
-  uint8_t shared_secret[32];
-
-  const char *errmsg;
-};
-
-struct pair_cipher_context
-{
-  uint8_t encryption_key[32];
-  uint8_t decryption_key[32];
-
-  uint64_t encryption_counter;
-  uint64_t decryption_counter;
-
-  const char *errmsg;
-};
-
 /* ---------------------------------- SRP ---------------------------------- */
 
 typedef enum
@@ -267,17 +119,6 @@ typedef struct
   bnum g;
 } NGConstant;
 
-#if CONFIG_OPENSSL
-typedef union
-{
-  SHA_CTX    sha;
-  SHA256_CTX sha256;
-  SHA512_CTX sha512;
-} HashCTX;
-#elif CONFIG_GCRYPT
-typedef gcry_md_hd_t HashCTX;
-#endif
-
 struct SRPUser
 {
   enum hash_alg     alg;
@@ -288,11 +129,11 @@ struct SRPUser
   bnum S;
 
   const unsigned char *bytes_A;
-  int                 authenticated;
+  int           authenticated;
     
-  const char          *username;
-  const unsigned char *password;
-  int                 password_len;
+  char          *username;
+  unsigned char *password;
+  int           password_len;
     
   unsigned char M           [SHA512_DIGEST_LENGTH];
   unsigned char H_AMK       [SHA512_DIGEST_LENGTH];
@@ -365,156 +206,6 @@ free_ng(NGConstant * ng)
   free(ng);
 }
 
-static int
-hash_init(enum hash_alg alg, HashCTX *c)
-{
-#if CONFIG_OPENSSL
-  switch (alg)
-    {
-      case HASH_SHA1  : return SHA1_Init(&c->sha);
-      case HASH_SHA224: return SHA224_Init(&c->sha256);
-      case HASH_SHA256: return SHA256_Init(&c->sha256);
-      case HASH_SHA384: return SHA384_Init(&c->sha512);
-      case HASH_SHA512: return SHA512_Init(&c->sha512);
-      default:
-        return -1;
-    };
-#elif CONFIG_GCRYPT
-  gcry_error_t err;
-
-  err = gcry_md_open(c, alg, 0);
-
-  if (err)
-    return -1;
-
-  return 0;
-#endif
-}
-
-static int
-hash_update(enum hash_alg alg, HashCTX *c, const void *data, size_t len)
-{
-#if CONFIG_OPENSSL
-  switch (alg)
-    {
-      case HASH_SHA1  : return SHA1_Update(&c->sha, data, len);
-      case HASH_SHA224: return SHA224_Update(&c->sha256, data, len);
-      case HASH_SHA256: return SHA256_Update(&c->sha256, data, len);
-      case HASH_SHA384: return SHA384_Update(&c->sha512, data, len);
-      case HASH_SHA512: return SHA512_Update(&c->sha512, data, len);
-      default:
-        return -1;
-    };
-#elif CONFIG_GCRYPT
-  gcry_md_write(*c, data, len);
-  return 0;
-#endif
-}
-
-static int
-hash_final(enum hash_alg alg, HashCTX *c, unsigned char *md)
-{
-#if CONFIG_OPENSSL
-  switch (alg)
-    {
-      case HASH_SHA1  : return SHA1_Final(md, &c->sha);
-      case HASH_SHA224: return SHA224_Final(md, &c->sha256);
-      case HASH_SHA256: return SHA256_Final(md, &c->sha256);
-      case HASH_SHA384: return SHA384_Final(md, &c->sha512);
-      case HASH_SHA512: return SHA512_Final(md, &c->sha512);
-      default:
-        return -1;
-    };
-#elif CONFIG_GCRYPT
-  unsigned char *buf = gcry_md_read(*c, alg);
-  if (!buf)
-    return -1;
-
-  memcpy(md, buf, gcry_md_get_algo_dlen(alg));
-  gcry_md_close(*c);
-  return 0;
-#endif
-}
-
-static unsigned char *
-hash(enum hash_alg alg, const unsigned char *d, size_t n, unsigned char *md)
-{
-#if CONFIG_OPENSSL
-  switch (alg)
-    {
-      case HASH_SHA1  : return SHA1(d, n, md);
-      case HASH_SHA224: return SHA224(d, n, md);
-      case HASH_SHA256: return SHA256(d, n, md);
-      case HASH_SHA384: return SHA384(d, n, md);
-      case HASH_SHA512: return SHA512(d, n, md);
-      default:
-        return NULL;
-    };
-#elif CONFIG_GCRYPT
-  gcry_md_hash_buffer(alg, md, d, n);
-  return md;
-#endif
-}
-
-static int
-hash_length(enum hash_alg alg)
-{
-#if CONFIG_OPENSSL
-  switch (alg)
-    {
-      case HASH_SHA1  : return SHA_DIGEST_LENGTH;
-      case HASH_SHA224: return SHA224_DIGEST_LENGTH;
-      case HASH_SHA256: return SHA256_DIGEST_LENGTH;
-      case HASH_SHA384: return SHA384_DIGEST_LENGTH;
-      case HASH_SHA512: return SHA512_DIGEST_LENGTH;
-      default:
-        return -1;
-    };
-#elif CONFIG_GCRYPT
-  return gcry_md_get_algo_dlen(alg);
-#endif
-}
-
-static bnum
-H_nn_pad(enum hash_alg alg, const bnum n1, const bnum n2)
-{
-  bnum          bn;
-  unsigned char *bin;
-  unsigned char buff[SHA512_DIGEST_LENGTH];
-  int           len_n1 = bnum_num_bytes(n1);
-  int           len_n2 = bnum_num_bytes(n2);
-  int           nbytes = 2 * len_n1;
-
-  if ((len_n2 < 1) || (len_n2 > len_n1))
-    return 0;
-
-  bin = calloc( 1, nbytes );
-
-  bnum_bn2bin(n1, bin, len_n1);
-  bnum_bn2bin(n2, bin + nbytes - len_n2, len_n2);
-  hash( alg, bin, nbytes, buff );
-  free(bin);
-  bnum_bin2bn(bn, buff, hash_length(alg));
-  return bn;
-}
-
-static bnum
-H_ns(enum hash_alg alg, const bnum n, const unsigned char *bytes, int len_bytes)
-{
-  bnum          bn;
-  unsigned char buff[SHA512_DIGEST_LENGTH];
-  int           len_n  = bnum_num_bytes(n);
-  int           nbytes = len_n + len_bytes;
-  unsigned char *bin   = malloc(nbytes);
-
-  bnum_bn2bin(n, bin, len_n);
-  memcpy( bin + len_n, bytes, len_bytes );
-  hash( alg, bin, nbytes, buff );
-  free(bin);
-  bnum_bin2bn(bn, buff, hash_length(alg));
-  return bn;
-}
-
 static bnum
 calculate_x(enum hash_alg alg, const bnum salt, const char *username, const unsigned char *password, int password_len)
 {
@@ -528,28 +219,6 @@ calculate_x(enum hash_alg alg, const bnum salt, const char *username, const unsi
   hash_final( alg, &ctx, ucp_hash );
         
   return H_ns( alg, salt, ucp_hash, hash_length(alg) );
-}
-
-static void
-update_hash_n(enum hash_alg alg, HashCTX *ctx, const bnum n)
-{
-  unsigned long len = bnum_num_bytes(n);
-  unsigned char *n_bytes = malloc(len);
-
-  bnum_bn2bin(n, n_bytes, len);
-  hash_update(alg, ctx, n_bytes, len);
-  free(n_bytes);
-}
-
-static void
-hash_num(enum hash_alg alg, const bnum n, unsigned char *dest)
-{
-  int           nbytes = bnum_num_bytes(n);
-  unsigned char *bin   = malloc(nbytes);
-
-  bnum_bn2bin(n, bin, nbytes);
-  hash( alg, bin, nbytes, dest );
-  free(bin);
 }
 
 static void
@@ -619,15 +288,15 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (!usr->ng || !usr->a || !usr->A || !usr->S)
     goto err_exit;
     
-  usr->username     = (const char *) malloc(ulen);
-  usr->password     = (const unsigned char *) malloc(len_password);
+  usr->username     = malloc(ulen);
+  usr->password     = malloc(len_password);
   usr->password_len = len_password;
 
   if (!usr->username || !usr->password)
     goto err_exit;
     
-  memcpy((char *)usr->username, username,       ulen);
-  memcpy((char *)usr->password, bytes_password, len_password);
+  memcpy(usr->username, username,       ulen);
+  memcpy(usr->password, bytes_password, len_password);
 
   usr->authenticated = 0;
   usr->bytes_A = 0;
@@ -641,12 +310,12 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   bnum_free(usr->a);
   bnum_free(usr->A);
   bnum_free(usr->S);
-  if (usr->username)
-    free((void*)usr->username);
+
+  free(usr->username);
   if (usr->password)
     {
-      memset((void*)usr->password, 0, usr->password_len);
-      free((void*)usr->password);
+      memset(usr->password, 0, usr->password_len);
+      free(usr->password);
     }
   free(usr);
 
@@ -654,7 +323,7 @@ srp_user_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
 }
 
 static void
-srp_user_delete(struct SRPUser *usr)
+srp_user_free(struct SRPUser *usr)
 {
   if(!usr)
     return;
@@ -662,16 +331,14 @@ srp_user_delete(struct SRPUser *usr)
   bnum_free(usr->a);
   bnum_free(usr->A);
   bnum_free(usr->S);
-      
+
   free_ng(usr->ng);
 
-  memset((void*)usr->password, 0, usr->password_len);
-      
-  free((char *)usr->username);
-  free((char *)usr->password);
-      
-  if (usr->bytes_A) 
-    free( (char *)usr->bytes_A );
+  memset(usr->password, 0, usr->password_len);
+
+  free(usr->username);
+  free(usr->password);
+  free((char *)usr->bytes_A);
 
   memset(usr, 0, sizeof(*usr));
   free(usr);
@@ -801,50 +468,7 @@ srp_user_verify_session(struct SRPUser *usr, const unsigned char *bytes_HAMK)
 
 /* -------------------------------- HELPERS -------------------------------- */
 
-
-#ifndef MIN
-# define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#include <ctype.h> // for isprint()
-
 #ifdef DEBUG_PAIR
-static void
-hexdump(const char *msg, uint8_t *mem, size_t len)
-{
-  int i, j;
-  int hexdump_cols = 16;
-
-  if (msg)
-    printf("%s", msg);
-
-  for (i = 0; i < len + ((len % hexdump_cols) ? (hexdump_cols - len % hexdump_cols) : 0); i++)
-    {
-      if(i % hexdump_cols == 0)
-	printf("0x%06x: ", i);
- 
-      if (i < len)
-	printf("%02x ", 0xFF & ((char*)mem)[i]);
-      else
-	printf("   ");
-
-      if (i % hexdump_cols == (hexdump_cols - 1))
-	{
-	  for (j = i - (hexdump_cols - 1); j <= i; j++)
-	    {
-	      if (j >= len)
-		putchar(' ');
-	      else if (isprint(((char*)mem)[j]))
-		putchar(0xFF & ((char*)mem)[j]);
-	      else
-		putchar('.');
-	    }
-
-	  putchar('\n');
-	}
-    }
-}
-
 static void
 tlv_debug(const tlv_values_t *values)
 {
@@ -857,7 +481,7 @@ tlv_debug(const tlv_values_t *values)
 }
 #endif
 
-tlv_values_t *
+static tlv_values_t *
 response_process(const uint8_t *data, uint32_t data_len, const char **errmsg)
 {
   tlv_values_t *response;
@@ -1145,10 +769,10 @@ create_and_sign_device_info(uint8_t *data, size_t *data_len, const char *device_
 }
 
 
-/* ---------------------------------- API ---------------------------------- */
+/* -------------------------- IMPLEMENTATION -------------------------------- */
 
-struct pair_setup_context *
-pair_setup_new(const char *pin, const char *device_id)
+static struct pair_setup_context *
+pair_setup_new(int type, const char *pin, const char *device_id)
 {
   struct pair_setup_context *sctx;
 
@@ -1165,6 +789,8 @@ pair_setup_new(const char *pin, const char *device_id)
   if (!sctx)
     return NULL;
 
+  sctx->type = type;
+
   memcpy(sctx->pin, pin, sizeof(sctx->pin));
 
   if (device_id)
@@ -1173,13 +799,13 @@ pair_setup_new(const char *pin, const char *device_id)
   return sctx;
 }
 
-void
+static void
 pair_setup_free(struct pair_setup_context *sctx)
 {
   if (!sctx)
     return;
 
-  srp_user_delete(sctx->user);
+  srp_user_free(sctx->user);
 
   free(sctx->pkB);
   free(sctx->M2);
@@ -1190,13 +816,7 @@ pair_setup_free(struct pair_setup_context *sctx)
   free(sctx);
 }
 
-const char *
-pair_setup_errmsg(struct pair_setup_context *sctx)
-{
-  return sctx->errmsg;
-}
-
-uint8_t *
+static uint8_t *
 pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
 {
   tlv_values_t *request;
@@ -1238,7 +858,7 @@ pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
   return NULL;
 }
 
-uint8_t *
+static uint8_t *
 pair_setup_request2(uint32_t *len, struct pair_setup_context *sctx)
 {
   tlv_values_t *request;
@@ -1279,7 +899,7 @@ pair_setup_request2(uint32_t *len, struct pair_setup_context *sctx)
   return NULL;
 }
 
-uint8_t *
+static uint8_t *
 pair_setup_request3(uint32_t *len, struct pair_setup_context *sctx)
 {
   tlv_values_t *request;
@@ -1382,7 +1002,7 @@ pair_setup_request3(uint32_t *len, struct pair_setup_context *sctx)
   return NULL;
 }
 
-int
+static int
 pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   tlv_values_t *response;
@@ -1420,7 +1040,7 @@ pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint3
   return -1;
 }
 
-int
+static int
 pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   tlv_values_t *response;
@@ -1460,7 +1080,7 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint3
   return -1;
 }
 
-int
+static int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   tlv_values_t *response;
@@ -1542,94 +1162,7 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint3
   return -1;
 }
 
-int
-pair_setup_result(const char **authorisation_key, struct pair_setup_context *sctx)
-{
-  struct pair_verify_context *vctx;
-  char *ptr;
-  int i;
-
-  if (sizeof(vctx->client_public_key) != sizeof(sctx->public_key) || sizeof(vctx->client_private_key) != sizeof(sctx->private_key))
-    {
-      sctx->errmsg = "Setup result: Bug!";
-      return -1;
-    }
-
-  // Fills out the auth_key with public + private in hex. It seems that the private
-  // key actually includes the public key (last 32 bytes), so we could in
-  // principle just export the private key
-  ptr = sctx->auth_key;
-  for (i = 0; i < sizeof(sctx->public_key); i++)
-    ptr += sprintf(ptr, "%02x", sctx->public_key[i]);
-  for (i = 0; i < sizeof(sctx->private_key); i++)
-    ptr += sprintf(ptr, "%02x", sctx->private_key[i]);
-  *ptr = '\0';
-
-  *authorisation_key = sctx->auth_key;
-  return 0;
-}
-
-
-struct pair_verify_context *
-pair_verify_new(const char *authorisation_key, const char *device_id)
-{
-  struct pair_verify_context *vctx;
-  char hex[] = { 0, 0, 0 };
-  const char *ptr;
-  int i;
-
-  if (sodium_init() == -1)
-    return NULL;
-
-  if (!authorisation_key)
-    return NULL;
-
-  if (strlen(authorisation_key) != 2 * (sizeof(vctx->client_public_key) + sizeof(vctx->client_private_key)))
-    return NULL;
-
-  if (device_id && strlen(device_id) != 16)
-    return NULL;
-
-  vctx = calloc(1, sizeof(struct pair_verify_context));
-  if (!vctx)
-    return NULL;
-
-  if (device_id)
-    memcpy(vctx->device_id, device_id, strlen(device_id));
-
-  ptr = authorisation_key;
-  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
-    {
-      hex[0] = ptr[0];
-      hex[1] = ptr[1];
-      vctx->client_public_key[i] = strtol(hex, NULL, 16);
-    }
-  for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
-    {
-      hex[0] = ptr[0];
-      hex[1] = ptr[1];
-      vctx->client_private_key[i] = strtol(hex, NULL, 16);
-    }
-
-  return vctx;
-}
-
-void
-pair_verify_free(struct pair_verify_context *vctx)
-{
-  if (!vctx)
-    return;
-
-  free(vctx);
-}
-
-const char *
-pair_verify_errmsg(struct pair_verify_context *vctx)
-{
-  return vctx->errmsg;
-}
-
-uint8_t *
+static uint8_t *
 pair_verify_request1(uint32_t *len, struct pair_verify_context *vctx)
 {
   const uint8_t basepoint[32] = {9};
@@ -1670,7 +1203,7 @@ pair_verify_request1(uint32_t *len, struct pair_verify_context *vctx)
   return NULL;
 }
 
-uint8_t *
+static uint8_t *
 pair_verify_request2(uint32_t *len, struct pair_verify_context *vctx)
 {
   tlv_values_t *request;
@@ -1740,7 +1273,7 @@ pair_verify_request2(uint32_t *len, struct pair_verify_context *vctx)
   return NULL;
 }
 
-int
+static int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
 {
   tlv_values_t *response;
@@ -1829,16 +1362,17 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
   return -1;
 }
 
-int
-pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vctx)
+static void
+pair_cipher_free(struct pair_cipher_context *cctx)
 {
-  *shared_secret = vctx->shared_secret;
+  if (!cctx)
+    return;
 
-  return 0;
+  free(cctx);
 }
 
-struct pair_cipher_context *
-pair_cipher_new(const uint8_t shared_secret[32])
+static struct pair_cipher_context *
+pair_cipher_new(int type, const uint8_t shared_secret[32])
 {
   struct pair_cipher_context *cctx;
   int ret;
@@ -1846,6 +1380,8 @@ pair_cipher_new(const uint8_t shared_secret[32])
   cctx = calloc(1, sizeof(struct pair_cipher_context));
   if (!cctx)
     goto error;
+
+  cctx->type = type;
 
   ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, 32, PAIR_CONTROL_WRITE);
   if (ret < 0)
@@ -1862,22 +1398,7 @@ pair_cipher_new(const uint8_t shared_secret[32])
   return NULL;
 }
 
-void
-pair_cipher_free(struct pair_cipher_context *cctx)
-{
-  if (!cctx)
-    return;
-
-  free(cctx);
-}
-
-const char *
-pair_cipher_errmsg(struct pair_cipher_context *cctx)
-{
-  return cctx->errmsg;
-}
-
-int
+static int
 pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx)
 {
   uint8_t nonce[NONCE_LENGTH] = { 0 };
@@ -1933,7 +1454,7 @@ pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, s
   return 0;
 }
 
-int
+static int
 pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx)
 {
   uint8_t nonce[NONCE_LENGTH] = { 0 };
@@ -1988,3 +1509,27 @@ pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, si
   return 0;
 }
 
+struct pair_definition pair_homekit =
+{
+  .pair_setup_new = pair_setup_new,
+  .pair_setup_free = pair_setup_free,
+
+  .pair_setup_request1 = pair_setup_request1,
+  .pair_setup_request2 = pair_setup_request2,
+  .pair_setup_request3 = pair_setup_request3,
+
+  .pair_setup_response1 = pair_setup_response1,
+  .pair_setup_response2 = pair_setup_response2,
+  .pair_setup_response3 = pair_setup_response3,
+
+  .pair_verify_request1 = pair_verify_request1,
+  .pair_verify_request2 = pair_verify_request2,
+
+  .pair_verify_response1 = pair_verify_response1,
+
+  .pair_cipher_new = pair_cipher_new,
+  .pair_cipher_free = pair_cipher_free,
+
+  .pair_encrypt = pair_encrypt,
+  .pair_decrypt = pair_decrypt,
+};

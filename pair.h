@@ -21,7 +21,7 @@ struct pair_cipher_context;
  * required for homekit pairing, where it should have length 16.
  */
 struct pair_setup_context *
-pair_setup_new(const char *pin, const char *device_id);
+pair_setup_new(enum pair_type type, const char *pin, const char *device_id);
 void
 pair_setup_free(struct pair_setup_context *sctx);
 
@@ -58,7 +58,7 @@ pair_setup_result(const char **authorisation_key, struct pair_setup_context *sct
  * device_id is only required for homekit pairing, where it should have len 16.
  */
 struct pair_verify_context *
-pair_verify_new(const char *authorisation_key, const char *device_id);
+pair_verify_new(enum pair_type type, const char *authorisation_key, const char *device_id);
 void
 pair_verify_free(struct pair_verify_context *vctx);
 
@@ -87,7 +87,7 @@ pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vc
  * create a ciphering context.
  */
 struct pair_cipher_context *
-pair_cipher_new(const uint8_t shared_secret[32]);
+pair_cipher_new(enum pair_type type, const uint8_t shared_secret[32]);
 void
 pair_cipher_free(struct pair_cipher_context *cctx);
 
@@ -101,4 +101,4 @@ pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, s
 int
 pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
 
-#endif  /* !__VERIFICATION_H__ */
+#endif  /* !__PAIR_AP_H__ */

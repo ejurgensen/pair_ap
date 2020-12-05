@@ -21,6 +21,8 @@ static struct event_base *evbase;
 static struct evrtsp_connection *evcon;
 static int cseq;
 
+static enum pair_type pair_type;
+
 static struct pair_cipher_context *cipher_ctx;
 static struct pair_verify_context *verify_ctx;
 static struct pair_setup_context *setup_ctx;
@@ -163,7 +165,7 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  cipher_ctx = pair_cipher_new(shared_secret);
+  cipher_ctx = pair_cipher_new(pair_type, shared_secret);
   if (!cipher_ctx)
     goto error;
 
@@ -235,7 +237,7 @@ verify_step1_request(const char *authorisation_key)
   uint32_t len;
   int ret;
 
-  verify_ctx = pair_verify_new(authorisation_key, DEVICE_ID);
+  verify_ctx = pair_verify_new(pair_type, authorisation_key, DEVICE_ID);
   if (!verify_ctx)
     return -1;
 
@@ -424,7 +426,7 @@ setup_start_response(struct evrtsp_request *req, void *arg)
       goto error;
     }
 
-  setup_ctx = pair_setup_new(pin, DEVICE_ID);
+  setup_ctx = pair_setup_new(pair_type, pin, DEVICE_ID);
   if (!setup_ctx)
     goto error;
 
@@ -455,15 +457,26 @@ main( int argc, char * argv[] )
 {
   int ret;
 
-  if (argc < 3 || argc > 4)
+  if (argc < 4 || argc > 5)
     {
-      printf("%s ip_address port [skip_pin]\n", argv[0]);
+      printf("%s ip_address port homekit|fruit [skip_pin]\n", argv[0]);
       return -1;
     }
 
   const char *address = argv[1];
   const char *port = argv[2];
-  int skip_pin = (argc == 4);
+  int skip_pin = (argc == 5);
+
+  if (strcmp(argv[3], "fruit") == 0)
+    {
+      printf("Pair type is fruit\n");
+      pair_type = PAIR_FRUIT;
+    }
+  else
+    {
+      printf("Pair type is homekit\n");
+      pair_type = PAIR_HOMEKIT;
+    }
 
   evbase = event_base_new();
   evcon = evrtsp_connection_new(address, atoi(port));
