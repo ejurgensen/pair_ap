@@ -34,7 +34,7 @@
 #include <plist/plist.h>
 #include <sodium.h>
 
-#include "verification.h"
+#include "pair.h"
 
 /* -------------------- GCRYPT AND OPENSSL COMPABILITY --------------------- */
 /*                   partly borrowed from ffmpeg (rtmpdh.c)                  */
@@ -131,7 +131,7 @@ enum hash_alg
 };
 #endif
 
-struct verification_setup_context
+struct pair_setup_context
 {
   struct SRPUser *user;
 
@@ -165,7 +165,7 @@ struct verification_setup_context
   const char *errmsg;
 };
 
-struct verification_verify_context
+struct pair_verify_context
 {
   uint8_t server_eph_public_key[32];
   uint8_t server_public_key[64];
@@ -924,15 +924,15 @@ encrypt_ctr(unsigned char *ciphertext, int ciphertext_len,
 
 /* ---------------------------------- API ---------------------------------- */
 
-struct verification_setup_context *
-verification_setup_new(const char *pin)
+struct pair_setup_context *
+pair_setup_new(const char *pin)
 {
-  struct verification_setup_context *sctx;
+  struct pair_setup_context *sctx;
 
   if (sodium_init() == -1)
     return NULL;
 
-  sctx = calloc(1, sizeof(struct verification_setup_context));
+  sctx = calloc(1, sizeof(struct pair_setup_context));
   if (!sctx)
     return NULL;
 
@@ -942,7 +942,7 @@ verification_setup_new(const char *pin)
 }
 
 void
-verification_setup_free(struct verification_setup_context *sctx)
+pair_setup_free(struct pair_setup_context *sctx)
 {
   if (!sctx)
     return;
@@ -959,13 +959,13 @@ verification_setup_free(struct verification_setup_context *sctx)
 }
 
 const char *
-verification_setup_errmsg(struct verification_setup_context *sctx)
+pair_setup_errmsg(struct pair_setup_context *sctx)
 {
   return sctx->errmsg;
 }
 
 uint8_t *
-verification_setup_request1(uint32_t *len, struct verification_setup_context *sctx)
+pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
 {
   plist_t dict;
   plist_t method;
@@ -988,7 +988,7 @@ verification_setup_request1(uint32_t *len, struct verification_setup_context *sc
 }
 
 uint8_t *
-verification_setup_request2(uint32_t *len, struct verification_setup_context *sctx)
+pair_setup_request2(uint32_t *len, struct pair_setup_context *sctx)
 {
   plist_t dict;
   plist_t pk;
@@ -1015,7 +1015,7 @@ verification_setup_request2(uint32_t *len, struct verification_setup_context *sc
 }
 
 uint8_t *
-verification_setup_request3(uint32_t *len, struct verification_setup_context *sctx)
+pair_setup_request3(uint32_t *len, struct pair_setup_context *sctx)
 {
   plist_t dict;
   plist_t epk;
@@ -1078,7 +1078,7 @@ verification_setup_request3(uint32_t *len, struct verification_setup_context *sc
 }
 
 int
-verification_setup_response1(struct verification_setup_context *sctx, const uint8_t *data, uint32_t data_len)
+pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   plist_t dict;
   plist_t pk;
@@ -1104,7 +1104,7 @@ verification_setup_response1(struct verification_setup_context *sctx, const uint
 }
 
 int
-verification_setup_response2(struct verification_setup_context *sctx, const uint8_t *data, uint32_t data_len)
+pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   plist_t dict;
   plist_t proof;
@@ -1135,7 +1135,7 @@ verification_setup_response2(struct verification_setup_context *sctx, const uint
 }
 
 int
-verification_setup_response3(struct verification_setup_context *sctx, const uint8_t *data, uint32_t data_len)
+pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   plist_t dict;
   plist_t epk;
@@ -1169,9 +1169,9 @@ verification_setup_response3(struct verification_setup_context *sctx, const uint
 }
 
 int
-verification_setup_result(const char **authorisation_key, struct verification_setup_context *sctx)
+pair_setup_result(const char **authorisation_key, struct pair_setup_context *sctx)
 {
-  struct verification_verify_context *vctx;
+  struct pair_verify_context *vctx;
   char *ptr;
   int i;
 
@@ -1196,10 +1196,10 @@ verification_setup_result(const char **authorisation_key, struct verification_se
 }
 
 
-struct verification_verify_context *
-verification_verify_new(const char *authorisation_key)
+struct pair_verify_context *
+pair_verify_new(const char *authorisation_key)
 {
-  struct verification_verify_context *vctx;
+  struct pair_verify_context *vctx;
   char hex[] = { 0, 0, 0 };
   const char *ptr;
   int i;
@@ -1213,7 +1213,7 @@ verification_verify_new(const char *authorisation_key)
   if (strlen(authorisation_key) != 2 * (sizeof(vctx->client_public_key) + sizeof(vctx->client_private_key)))
     return NULL;
 
-  vctx = calloc(1, sizeof(struct verification_verify_context));
+  vctx = calloc(1, sizeof(struct pair_verify_context));
   if (!vctx)
     return NULL;
 
@@ -1235,7 +1235,7 @@ verification_verify_new(const char *authorisation_key)
 }
 
 void
-verification_verify_free(struct verification_verify_context *vctx)
+pair_verify_free(struct pair_verify_context *vctx)
 {
   if (!vctx)
     return;
@@ -1244,13 +1244,13 @@ verification_verify_free(struct verification_verify_context *vctx)
 }
 
 const char *
-verification_verify_errmsg(struct verification_verify_context *vctx)
+pair_verify_errmsg(struct pair_verify_context *vctx)
 {
   return vctx->errmsg;
 }
 
 uint8_t *
-verification_verify_request1(uint32_t *len, struct verification_verify_context *vctx)
+pair_verify_request1(uint32_t *len, struct pair_verify_context *vctx)
 {
   const uint8_t basepoint[32] = {9};
   uint8_t *data;
@@ -1279,7 +1279,7 @@ verification_verify_request1(uint32_t *len, struct verification_verify_context *
 }
 
 uint8_t *
-verification_verify_request2(uint32_t *len, struct verification_verify_context *vctx)
+pair_verify_request2(uint32_t *len, struct pair_verify_context *vctx)
 {
   uint8_t shared_secret[crypto_scalarmult_BYTES];
   uint8_t key[SHA512_DIGEST_LENGTH];
@@ -1347,7 +1347,7 @@ verification_verify_request2(uint32_t *len, struct verification_verify_context *
 }
 
 int
-verification_verify_response1(struct verification_verify_context *vctx, const uint8_t *data, uint32_t data_len)
+pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
 {
   uint32_t wanted;
 
