@@ -37,6 +37,7 @@ struct pair_setup_context
   uint8_t *authtag;
   uint64_t authtag_len;
 
+  int setup_is_completed;
   const char *errmsg;
 };
 
@@ -57,6 +58,7 @@ struct pair_verify_context
 
   uint8_t shared_secret[32];
 
+  int verify_is_completed;
   const char *errmsg;
 };
 
@@ -90,6 +92,7 @@ struct pair_definition
   uint8_t *(*pair_verify_request2)(uint32_t *len, struct pair_verify_context *vctx);
 
   int (*pair_verify_response1)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
+  int (*pair_verify_response2)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
   struct pair_cipher_context *(*pair_cipher_new)(int type, const uint8_t shared_secret[32]);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);

@@ -46,6 +46,7 @@ extern "C" {
 /* Response codes */
 #define RTSP_OK			200
 #define RTSP_UNAUTHORIZED       401
+#define RTSP_FORBIDDEN          403
 
 struct evrtsp_connection;
 
@@ -58,7 +59,7 @@ enum evrtsp_cmd_type {
   EVRTSP_REQ_SETUP,
   EVRTSP_REQ_RECORD,
   EVRTSP_REQ_PAUSE,
-  EVRTSP_REQ_GET_PARAMETER,
+  EVRTSP_REQ_GET_PARAMETER, // Careful using this, some devices do not support it or will hang up eg RAOP_DEV_APEX1_80211G
   EVRTSP_REQ_SET_PARAMETER,
   EVRTSP_REQ_FLUSH,
   EVRTSP_REQ_TEARDOWN,

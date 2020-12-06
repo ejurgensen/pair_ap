@@ -74,6 +74,8 @@ pair_verify_request2(uint32_t *len, struct pair_verify_context *vctx);
 
 int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
+int
+pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
 /* Returns a pointer to the shared secret that is 32 bytes. The caller
  * should save it and use it later to initialize pair_cipher_new().

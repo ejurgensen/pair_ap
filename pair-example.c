@@ -159,6 +159,10 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
+  ret = pair_verify_response2(verify_ctx, response, ret);
+  if (ret < 0)
+    goto error;
+
   printf("Verify complete\n");
 
   ret = pair_verify_result(&shared_secret, verify_ctx);

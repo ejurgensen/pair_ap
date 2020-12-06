@@ -953,6 +953,13 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
   return 0;
 }
 
+static int
+pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
+{
+  // TODO actually check response
+  return 0;
+}
+
 struct pair_definition pair_fruit =
 {
   .pair_setup_new = pair_setup_new,
@@ -970,4 +977,5 @@ struct pair_definition pair_fruit =
   .pair_verify_request2 = pair_verify_request2,
 
   .pair_verify_response1 = pair_verify_response1,
+  .pair_verify_response2 = pair_verify_response2,
 };

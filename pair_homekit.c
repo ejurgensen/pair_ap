@@ -1,4 +1,10 @@
 /*
+ * Adaption of ap2-sender by ViktoriiaKh:
+ *    <https://github.com/ViktoriiaKh/ap2-sender>
+ *
+ * To test, it is useful to try with this receiver:
+ *    <https://github.com/Argyropus/airplay2-receiver>
+ *
  * The Secure Remote Password 6a implementation is adapted from:
  *  - Tom Cocagne
  *    <https://github.com/cocagne/csrp>
@@ -921,7 +927,7 @@ decrypt_chacha(uint8_t *plain, uint8_t *cipher, size_t cipher_len, const uint8_t
     goto error;
 
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len, tag) != 1)
-    goto error; // TODO seems we don't actually check it by doing this
+    goto error;
 
   if (EVP_DecryptUpdate(ctx, NULL, &len, ad, ad_len) != 1)
     goto error;
@@ -1059,11 +1065,19 @@ pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
   uint8_t *data;
   size_t data_len;
   uint8_t method;
+  int endian_test = 1;
   int ret;
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   request = tlv_new();
+
+  // Test here instead of setup_new() so we can give an error message
+  if(*(char *)&endian_test != 1)
+    {
+      sctx->errmsg = "Setup request 1: No support for big endian architechture";
+      goto error;
+    }
 
   sctx->user = srp_user_new(HASH_SHA512, SRP_NG_3072, USERNAME, (unsigned char *)sctx->pin, sizeof(sctx->pin), 0, 0);
   if (!sctx->user)
@@ -1598,6 +1612,13 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
   return -1;
 }
 
+static int
+pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
+{
+  // TODO actually check response
+  return 0;
+}
+
 static void
 pair_cipher_free(struct pair_cipher_context *cctx)
 {
@@ -1762,6 +1783,7 @@ struct pair_definition pair_homekit =
   .pair_verify_request2 = pair_verify_request2,
 
   .pair_verify_response1 = pair_verify_response1,
+  .pair_verify_response2 = pair_verify_response2,
 
   .pair_cipher_new = pair_cipher_new,
   .pair_cipher_free = pair_cipher_free,

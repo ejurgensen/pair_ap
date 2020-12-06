@@ -774,7 +774,9 @@ static void
 evrtsp_connection_stop_detectclose(struct evrtsp_connection *evcon)
 {
 	evcon->flags &= ~EVRTSP_CON_CLOSEDETECT;
-	event_del(&evcon->close_ev);
+
+	if (event_initialized(&evcon->close_ev))
+		event_del(&evcon->close_ev);
 }
 
 /*
@@ -1332,6 +1334,7 @@ evrtsp_connection_get_local_address(struct evrtsp_connection *evcon,
 
   *address = NULL;
   *port = 0;
+  memset(&addr, 0, sizeof(addr));
 
   if (!evrtsp_connected(evcon))
     return;
@@ -1346,7 +1349,7 @@ evrtsp_connection_get_local_address(struct evrtsp_connection *evcon,
   if (!*address)
     return;
 
-  *family = addr.ss.ss_family;
+  *family = addr.sa.sa_family;
 
   switch (*family)
     {
@@ -1362,7 +1365,7 @@ evrtsp_connection_get_local_address(struct evrtsp_connection *evcon,
 
       default:
 	free(*address);
-	address = NULL;
+	*address = NULL;
 
 	event_err(1, "%s: unhandled address family\n", __func__);
 	return;

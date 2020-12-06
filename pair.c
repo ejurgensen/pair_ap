@@ -281,6 +281,9 @@ pair_setup_new(enum pair_type type, const char *pin, const char *device_id)
 void
 pair_setup_free(struct pair_setup_context *sctx)
 {
+  if (!sctx)
+    return;
+
   if (!pair[sctx->type]->pair_setup_free)
     return;
 
@@ -324,7 +327,7 @@ int
 pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   if (!pair[sctx->type]->pair_setup_response1)
-    return 0;
+    return -1;
 
   return pair[sctx->type]->pair_setup_response1(sctx, data, data_len);
 }
@@ -333,7 +336,7 @@ int
 pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   if (!pair[sctx->type]->pair_setup_response2)
-    return 0;
+    return -1;
 
   return pair[sctx->type]->pair_setup_response2(sctx, data, data_len);
 }
@@ -342,9 +345,13 @@ int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
   if (!pair[sctx->type]->pair_setup_response3)
-    return 0;
+    return -1;
 
-  return pair[sctx->type]->pair_setup_response3(sctx, data, data_len);
+  if (pair[sctx->type]->pair_setup_response3(sctx, data, data_len) != 0)
+    return -1;
+
+  sctx->setup_is_completed = 1;
+  return 0;
 }
 
 int
@@ -357,6 +364,12 @@ pair_setup_result(const char **authorisation_key, struct pair_setup_context *sct
   if (sizeof(vctx->client_public_key) != sizeof(sctx->public_key) || sizeof(vctx->client_private_key) != sizeof(sctx->private_key))
     {
       sctx->errmsg = "Setup result: Bug!";
+      return -1;
+    }
+
+  if (!sctx->setup_is_completed)
+    {
+      sctx->errmsg = "Setup result: The pair setup has not been completed";
       return -1;
     }
 
@@ -458,14 +471,33 @@ int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
 {
   if (!pair[vctx->type]->pair_verify_response1)
-    return 0;
+    return -1;
 
   return pair[vctx->type]->pair_verify_response1(vctx, data, data_len);
 }
 
 int
+pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
+{
+  if (!pair[vctx->type]->pair_verify_response2)
+    return -1;
+
+  if (pair[vctx->type]->pair_verify_response2(vctx, data, data_len) != 0)
+    return -1;
+
+  vctx->verify_is_completed = 1;
+  return 0;
+}
+
+int
 pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vctx)
 {
+  if (!vctx->verify_is_completed)
+    {
+      vctx->errmsg = "Verify result: The pairing verification did not complete";
+      return -1;
+    }
+
   *shared_secret = vctx->shared_secret;
 
   return 0;
@@ -483,6 +515,9 @@ pair_cipher_new(enum pair_type type, const uint8_t shared_secret[32])
 void
 pair_cipher_free(struct pair_cipher_context *cctx)
 {
+  if (!cctx)
+    return;
+
   if (!pair[cctx->type]->pair_cipher_free)
     return;
 
