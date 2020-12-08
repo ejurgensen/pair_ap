@@ -1,4 +1,4 @@
-# atv_verification
+# pair_ap
 C client implementation of pairing for:
 * Apple TV device verification, which became mandatory with tvOS 10.2
 * Homekit pairing (for AirPlay 2)
