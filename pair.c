@@ -1,16 +1,16 @@
 /*
  * The MIT License (MIT)
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
  * of the Software, and to permit persons to whom the Software is furnished to do
  * so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -18,7 +18,7 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- * 
+ *
  */
 
 #include <stdio.h>
@@ -161,7 +161,7 @@ hash_ab(enum hash_alg alg, unsigned char *md, const unsigned char *m1, int m1_le
   hash_update(alg, &ctx, m1, m1_len);
   hash_update(alg, &ctx, m2, m2_len);
   return hash_final(alg, &ctx, md);
-}    
+}
 
 bnum
 H_nn_pad(enum hash_alg alg, const bnum n1, const bnum n2)
@@ -242,7 +242,7 @@ hexdump(const char *msg, uint8_t *mem, size_t len)
     {
       if(i % hexdump_cols == 0)
 	printf("0x%06x: ", i);
- 
+
       if (i < len)
 	printf("%02x ", 0xFF & ((char*)mem)[i]);
       else
