@@ -504,12 +504,12 @@ pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vc
 }
 
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, const uint8_t shared_secret[32])
+pair_cipher_new(enum pair_type type, int channel, const uint8_t shared_secret[32])
 {
   if (!pair[type]->pair_cipher_new)
     return NULL;
 
-  return pair[type]->pair_cipher_new(type, shared_secret);
+  return pair[type]->pair_cipher_new(type, channel, shared_secret);
 }
 
 void

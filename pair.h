@@ -89,7 +89,7 @@ pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vc
  * create a ciphering context.
  */
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, const uint8_t shared_secret[32]);
+pair_cipher_new(enum pair_type type, int channel, const uint8_t shared_secret[32]);
 void
 pair_cipher_free(struct pair_cipher_context *cctx);
 

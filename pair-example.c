@@ -169,7 +169,7 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  cipher_ctx = pair_cipher_new(pair_type, shared_secret);
+  cipher_ctx = pair_cipher_new(pair_type, 0, shared_secret);
   if (!cipher_ctx)
     goto error;
 

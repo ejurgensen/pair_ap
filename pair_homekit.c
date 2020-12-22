@@ -69,6 +69,8 @@ enum pair_keys
   PAIR_VERIFY_MSG04,
   PAIR_CONTROL_WRITE,
   PAIR_CONTROL_READ,
+  PAIR_EVENTS_WRITE,
+  PAIR_EVENTS_READ,
 };
 
 struct pair_keys_map
@@ -96,9 +98,13 @@ struct pair_keys_map pair_keys_map[] =
   { 0x03, "Pair-Verify-Encrypt-Salt", "Pair-Verify-Encrypt-Info", "PV-Msg03" },
   { 0x04, NULL, NULL, "" },
 
-  // Encryption/decryption
+  // Encryption/decryption of control channel
   { 0, "Control-Salt", "Control-Write-Encryption-Key", "" },
   { 0, "Control-Salt", "Control-Read-Encryption-Key", "" },
+
+  // Encryption/decryption of event channel
+  { 0, "Events-Salt", "Events-Write-Encryption-Key", "" },
+  { 0, "Events-Salt", "Events-Read-Encryption-Key", "" },
 };
 
 enum pair_method {
@@ -1629,10 +1635,16 @@ pair_cipher_free(struct pair_cipher_context *cctx)
 }
 
 static struct pair_cipher_context *
-pair_cipher_new(int type, const uint8_t shared_secret[32])
+pair_cipher_new(int type, int channel, const uint8_t shared_secret[32])
 {
   struct pair_cipher_context *cctx;
+  enum pair_keys write_key;
+  enum pair_keys read_key;
   int ret;
+
+  // Note that events is opposite, probably because it is a reverse connection
+  write_key = (channel == 0) ? PAIR_CONTROL_WRITE : PAIR_EVENTS_READ;
+  read_key = (channel == 0) ? PAIR_CONTROL_READ : PAIR_EVENTS_WRITE;
 
   cctx = calloc(1, sizeof(struct pair_cipher_context));
   if (!cctx)
@@ -1640,11 +1652,11 @@ pair_cipher_new(int type, const uint8_t shared_secret[32])
 
   cctx->type = type;
 
-  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, 32, PAIR_CONTROL_WRITE);
+  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, 32, write_key);
   if (ret < 0)
     goto error;
 
-  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, 32, PAIR_CONTROL_READ);
+  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, 32, read_key);
   if (ret < 0)
     goto error;
 
