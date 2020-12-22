@@ -77,19 +77,18 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
 int
 pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
-/* Returns a pointer to the shared secret that is 32 bytes. The caller
- * should save it and use it later to initialize pair_cipher_new().
- * Note that the pointer becomes invalid when you free vctx.
+/* Writes the shared secret that is the result of the verification process to
+ * the buffer provided by caller. Returns an error if buffer is incorrect size.
  */
 int
-pair_verify_result(const uint8_t **shared_secret, struct pair_verify_context *vctx);
+pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair_verify_context *vctx);
 
 /* When you have completed the verification you can extract a key with
- * pair_verify_result(). Give the string as input to this function to
+ * pair_verify_result(). Give the shared secret as input to this function to
  * create a ciphering context.
  */
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, int channel, const uint8_t shared_secret[32]);
+pair_cipher_new(enum pair_type type, int channel, uint8_t *shared_secret, size_t shared_secret_len);
 void
 pair_cipher_free(struct pair_cipher_context *cctx);
 

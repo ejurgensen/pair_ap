@@ -1635,7 +1635,7 @@ pair_cipher_free(struct pair_cipher_context *cctx)
 }
 
 static struct pair_cipher_context *
-pair_cipher_new(int type, int channel, const uint8_t shared_secret[32])
+pair_cipher_new(int type, int channel, uint8_t *shared_secret, size_t shared_secret_len)
 {
   struct pair_cipher_context *cctx;
   enum pair_keys write_key;
@@ -1652,11 +1652,11 @@ pair_cipher_new(int type, int channel, const uint8_t shared_secret[32])
 
   cctx->type = type;
 
-  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, 32, write_key);
+  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, shared_secret_len, write_key);
   if (ret < 0)
     goto error;
 
-  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, 32, read_key);
+  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, shared_secret_len, read_key);
   if (ret < 0)
     goto error;
 

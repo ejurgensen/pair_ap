@@ -94,7 +94,7 @@ struct pair_definition
   int (*pair_verify_response1)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
   int (*pair_verify_response2)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
-  struct pair_cipher_context *(*pair_cipher_new)(int type, int channel, const uint8_t shared_secret[32]);
+  struct pair_cipher_context *(*pair_cipher_new)(int type, int channel, uint8_t *shared_secret, size_t shared_secret_len);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);
 
   int (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
