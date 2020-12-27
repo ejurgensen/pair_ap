@@ -8,8 +8,12 @@ enum pair_type
   // This is the pairing type required for Apple TV device verification, which
   // became mandatory with tvOS 10.2.
   PAIR_FRUIT,
-  // This is the Homekit type required for AirPlay 2.
-  PAIR_HOMEKIT,
+  // This is the Homekit type required for AirPlay 2 with both PIN setup and
+  // verification
+  PAIR_HOMEKIT_NORMAL,
+  // Same as normal except PIN is fixed to 3939 and stops after setup step 2,
+  // when session key is established
+  PAIR_HOMEKIT_TRANSIENT,
 };
 
 struct pair_setup_context;
@@ -44,12 +48,13 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint3
 int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len);
 
-/* Returns a 0-terminated string that is the authorisation key. The caller
- * should save it and use it later to initialize pair_verify_new().
- * Note that the pointer becomes invalid when you free sctx.
+/* Returns a 0-terminated string that is the authorisation key, along with a
+ * pointer to the binary representation. The string can be used to initialize
+ * pair_verify_new().
+ * Note that the pointers become invalid when you free sctx.
  */
 int
-pair_setup_result(const char **authorisation_key, struct pair_setup_context *sctx);
+pair_setup_result(const char **hexkey, const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx);
 
 
 /* When you have completed the setup you can extract a key with
@@ -58,7 +63,7 @@ pair_setup_result(const char **authorisation_key, struct pair_setup_context *sct
  * device_id is only required for homekit pairing, where it should have len 16.
  */
 struct pair_verify_context *
-pair_verify_new(enum pair_type type, const char *authorisation_key, const char *device_id);
+pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id);
 void
 pair_verify_free(struct pair_verify_context *vctx);
 
@@ -80,6 +85,7 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uin
 /* Writes the shared secret that is the result of the verification process to
  * the buffer provided by caller. Returns an error if buffer is incorrect size.
  */
+// TODO make this like pair_setup_result()
 int
 pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair_verify_context *vctx);
 
@@ -88,7 +94,7 @@ pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair
  * create a ciphering context.
  */
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, int channel, uint8_t *shared_secret, size_t shared_secret_len);
+pair_cipher_new(enum pair_type type, int channel, const uint8_t *shared_secret, size_t shared_secret_len);
 void
 pair_cipher_free(struct pair_cipher_context *cctx);
 

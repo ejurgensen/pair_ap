@@ -595,7 +595,7 @@ encrypt_ctr(unsigned char *ciphertext, int ciphertext_len,
 /* -------------------------- IMPLEMENTATION -------------------------------- */
 
 static struct pair_setup_context *
-pair_setup_new(int type, const char *pin, const char *device_id)
+pair_setup_new(struct pair_definition *type, const char *pin, const char *device_id)
 {
   struct pair_setup_context *sctx;
 
@@ -834,6 +834,22 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint3
 
   plist_free(dict);
 
+  sctx->setup_is_completed = 1;
+  return 0;
+}
+
+static int
+pair_setup_result(const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx)
+{
+  // Last 32 bytes of private key should match public key, but check assumption
+  if (memcmp(sctx->private_key + sizeof(sctx->private_key) - sizeof(sctx->public_key), sctx->public_key, sizeof(sctx->public_key)) != 0)
+    {
+      sctx->errmsg = "Pair setup result: Unexpected keys, private key does not match public key";
+      return -1;
+    }
+
+  *key = sctx->private_key;
+  *key_len = sizeof(sctx->private_key);
   return 0;
 }
 
@@ -964,6 +980,7 @@ struct pair_definition pair_fruit =
 {
   .pair_setup_new = pair_setup_new,
   .pair_setup_free = pair_setup_free,
+  .pair_setup_result = pair_setup_result,
 
   .pair_setup_request1 = pair_setup_request1,
   .pair_setup_request2 = pair_setup_request2,
