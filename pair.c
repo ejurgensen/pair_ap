@@ -506,7 +506,7 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uin
 }
 
 int
-pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair_verify_context *vctx)
+pair_verify_result(uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx)
 {
   if (!vctx->verify_is_completed)
     {
@@ -514,13 +514,8 @@ pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair
       return -1;
     }
 
-  if (shared_secret_len != sizeof(vctx->shared_secret))
-    {
-      vctx->errmsg = "Verify result: The shared secret buffer is incorrect size";
-      return -1;
-    }
-
-  memcpy(shared_secret, vctx->shared_secret, shared_secret_len);
+  *shared_secret = vctx->shared_secret;
+  *shared_secret_len = sizeof(vctx->shared_secret);
 
   return 0;
 }

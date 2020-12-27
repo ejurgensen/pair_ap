@@ -184,7 +184,8 @@ static void
 verify_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  uint8_t shared_secret[32];
+  uint8_t *shared_secret;
+  size_t shared_secret_len;
   int ret;
 
   ret = response_process(&response, req);
@@ -197,11 +198,11 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
 
   printf("Verify complete\n");
 
-  ret = pair_verify_result(shared_secret, sizeof(shared_secret), verify_ctx);
+  ret = pair_verify_result(&shared_secret, &shared_secret_len, verify_ctx);
   if (ret < 0)
     goto error;
 
-  cipher_ctx = pair_cipher_new(pair_type, 0, shared_secret, sizeof(shared_secret));
+  cipher_ctx = pair_cipher_new(pair_type, 0, shared_secret, shared_secret_len);
   if (!cipher_ctx)
     goto error;
 

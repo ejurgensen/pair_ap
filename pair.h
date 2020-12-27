@@ -82,12 +82,11 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
 int
 pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
-/* Writes the shared secret that is the result of the verification process to
- * the buffer provided by caller. Returns an error if buffer is incorrect size.
+/* Returns a pointer to the shared secret that is the result of the pairing.
+ * Note that the pointers become invalid when you free vctx.
  */
-// TODO make this like pair_setup_result()
 int
-pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair_verify_context *vctx);
+pair_verify_result(uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx);
 
 /* When you have completed the verification you can extract a key with
  * pair_verify_result(). Give the shared secret as input to this function to
