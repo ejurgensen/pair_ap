@@ -14,12 +14,21 @@
 #define DACP_ID "FF1DB45949E6CBD3"
 #define USER_AGENT "AirPlay/381.13"
 
+#define ENDPOINT_SETUP_FRUIT "/pair-setup-pin"
+#define CONTENTTYPE_SETUP_FRUIT "application/x-apple-binary-plist"
+
+#define ENDPOINT_SETUP_HOMEKIT "/pair-setup"
+#define CONTENTTYPE_SETUP_HOMEKIT "application/octet-stream"
+
 
 typedef void (*request_cb)(struct evrtsp_request *, void *);
 
 static struct event_base *evbase;
 static struct evrtsp_connection *evcon;
 static int cseq;
+
+static const char *endpoint_setup;
+static const char *content_type_setup;
 
 static enum pair_type pair_type;
 
@@ -309,7 +318,7 @@ setup_step3_request(void)
   if (!request)
     return -1;
 
-  ret = make_request("/pair-setup", request, len, "application/octet-stream", setup_step3_response);
+  ret = make_request(endpoint_setup, request, len, content_type_setup, setup_step3_response);
 
   free(request);
 
@@ -355,7 +364,7 @@ setup_step2_request(void)
   if (!request)
     return -1;
 
-  ret = make_request("/pair-setup", request, len, "application/octet-stream", setup_step2_response);
+  ret = make_request(endpoint_setup, request, len, content_type_setup, setup_step2_response);
 
   free(request);
 
@@ -399,7 +408,7 @@ setup_step1_request(void)
   if (!request)
     return -1;
 
-  ret = make_request("/pair-setup", request, len, "application/octet-stream", setup_step1_response);
+  ret = make_request(endpoint_setup, request, len, content_type_setup, setup_step1_response);
 
   free(request);
   return ret;
@@ -475,11 +484,15 @@ main( int argc, char * argv[] )
     {
       printf("Pair type is fruit\n");
       pair_type = PAIR_FRUIT;
+      endpoint_setup = ENDPOINT_SETUP_FRUIT;
+      content_type_setup = CONTENTTYPE_SETUP_FRUIT;
     }
   else
     {
       printf("Pair type is homekit\n");
       pair_type = PAIR_HOMEKIT;
+      endpoint_setup = ENDPOINT_SETUP_HOMEKIT;
+      content_type_setup = CONTENTTYPE_SETUP_HOMEKIT;
     }
 
   evbase = event_base_new();
