@@ -86,7 +86,7 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uin
  * Note that the pointers become invalid when you free vctx.
  */
 int
-pair_verify_result(uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx);
+pair_verify_result(const uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx);
 
 /* When you have completed the verification you can extract a key with
  * pair_verify_result(). Give the shared secret as input to this function to

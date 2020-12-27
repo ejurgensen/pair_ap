@@ -184,7 +184,7 @@ static void
 verify_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  uint8_t *shared_secret;
+  const uint8_t *shared_secret;
   size_t shared_secret_len;
   int ret;
 
