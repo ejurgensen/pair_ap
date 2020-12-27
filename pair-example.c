@@ -28,6 +28,25 @@ static struct pair_verify_context *verify_ctx;
 static struct pair_setup_context *setup_ctx;
 
 
+static char *
+prompt_pin(void)
+{
+  char *pin = NULL;
+  size_t len;
+
+  printf ("Enter pin: ");
+  fflush (stdout);
+
+  len = getline(&pin, &len, stdin);
+  if (len != 5) // Includes EOL
+    {
+      printf ("Bad pin length %zu\n", len);
+      return NULL;
+    }
+
+  return pin;
+}
+
 static int
 response_process(uint8_t **response, struct evrtsp_request *req)
 {
@@ -65,7 +84,11 @@ make_request(const char *url, const void *data, size_t len, const char *content_
   evrtsp_add_header(req->output_headers, "User-Agent", USER_AGENT);
 //  evrtsp_add_header(req->output_headers, "DACP-ID", DACP_ID);
 //  evrtsp_add_header(req->output_headers, "Active-Remote", ACTIVE_REMOTE);
-  evrtsp_add_header(req->output_headers, "X-Apple-HKP", "3");
+
+  if (pair_type == PAIR_HOMEKIT_NORMAL)
+    evrtsp_add_header(req->output_headers, "X-Apple-HKP", "3");
+  else if (pair_type == PAIR_HOMEKIT_TRANSIENT)
+    evrtsp_add_header(req->output_headers, "X-Apple-HKP", "4");
 
   printf("Making request %d to '%s'... ", cseq, url);
 
@@ -278,7 +301,7 @@ setup_step3_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  ret = pair_setup_result(&authorisation_key, setup_ctx);
+  ret = pair_setup_result(&authorisation_key, NULL, NULL, setup_ctx);
   if (ret < 0)
     goto error;
 
@@ -320,6 +343,8 @@ static void
 setup_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
+  const uint8_t *transient_key;
+  size_t transient_key_len;
   int ret;
 
   ret = response_process(&response, req);
@@ -331,6 +356,27 @@ setup_step2_response(struct evrtsp_request *req, void *arg)
     goto error;
 
   printf("Setup SRP stage complete\n");
+
+  if (pair_type == PAIR_HOMEKIT_TRANSIENT)
+    {
+      ret = pair_setup_result(NULL, &transient_key, &transient_key_len, setup_ctx);
+      if (ret < 0)
+	goto error;
+
+      cipher_ctx = pair_cipher_new(pair_type, 0, transient_key, transient_key_len);
+      if (!cipher_ctx)
+	goto error;
+
+      evrtsp_connection_set_ciphercb(evcon, rtsp_cipher, NULL);
+
+      ret = options_request();
+      if (ret < 0)
+	goto error;
+
+      pair_setup_free(setup_ctx);
+
+      return;
+    }
 
   ret = setup_step3_request();
   if (ret < 0)
@@ -410,7 +456,6 @@ setup_start_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
   char *pin = NULL;
-  size_t len;
   int ret;
 
   if (req)
@@ -420,14 +465,11 @@ setup_start_response(struct evrtsp_request *req, void *arg)
 	goto error;
     }
 
-  printf ("Enter pin: ");
-  fflush (stdout);
-
-  len = getline(&pin, &len, stdin);
-  if (len != 5) // Includes EOL
+  if (pair_type != PAIR_HOMEKIT_TRANSIENT)
     {
-      printf ("Bad pin length %zu\n", len);
-      goto error;
+      pin = prompt_pin();
+      if (!pin)
+	goto error;
     }
 
   setup_ctx = pair_setup_new(pair_type, pin, DEVICE_ID);
@@ -463,7 +505,7 @@ main( int argc, char * argv[] )
 
   if (argc < 4 || argc > 5)
     {
-      printf("%s ip_address port homekit|fruit [skip_pin]\n", argv[0]);
+      printf("%s ip_address port homekit|fruit|transient [skip_pin]\n", argv[0]);
       return -1;
     }
 
@@ -476,24 +518,31 @@ main( int argc, char * argv[] )
       printf("Pair type is fruit\n");
       pair_type = PAIR_FRUIT;
     }
-  else
+  else if (strcmp(argv[3], "homekit") == 0)
     {
-      printf("Pair type is homekit\n");
-      pair_type = PAIR_HOMEKIT;
+      printf("Pair type is homekit (normal)\n");
+      pair_type = PAIR_HOMEKIT_NORMAL;
+    }
+  else if (strcmp(argv[3], "transient") == 0)
+    {
+      printf("Pair type is homekit (transient)\n");
+      pair_type = PAIR_HOMEKIT_TRANSIENT;
     }
 
   evbase = event_base_new();
   evcon = evrtsp_connection_new(address, atoi(port));
   evrtsp_connection_set_base(evcon, evbase);
 
-  if (!skip_pin)
+  if (pair_type == PAIR_HOMEKIT_TRANSIENT || skip_pin)
+    {
+      setup_start_response(NULL, NULL);
+    }
+  else
     {
       ret = setup_start_request();
       if (ret < 0)
 	goto the_end;
     }
-  else
-    setup_start_response(NULL, NULL);
 
   event_base_dispatch(evbase);
 

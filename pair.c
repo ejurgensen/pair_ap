@@ -32,12 +32,14 @@
 #include "pair-internal.h"
 
 extern struct pair_definition pair_fruit;
-extern struct pair_definition pair_homekit;
+extern struct pair_definition pair_homekit_normal;
+extern struct pair_definition pair_homekit_transient;
 
 // Must be in sync with enum pair_type
 static struct pair_definition *pair[] = {
     &pair_fruit,
-    &pair_homekit,
+    &pair_homekit_normal,
+    &pair_homekit_transient,
 };
 
 /* -------------------------- SHARED HASHING HELPERS ------------------------ */
@@ -275,7 +277,7 @@ pair_setup_new(enum pair_type type, const char *pin, const char *device_id)
   if (!pair[type]->pair_setup_new)
     return NULL;
 
-  return pair[type]->pair_setup_new(type, pin, device_id);
+  return pair[type]->pair_setup_new(pair[type], pin, device_id);
 }
 
 void
@@ -284,10 +286,10 @@ pair_setup_free(struct pair_setup_context *sctx)
   if (!sctx)
     return;
 
-  if (!pair[sctx->type]->pair_setup_free)
+  if (!sctx->type->pair_setup_free)
     return;
 
-  return pair[sctx->type]->pair_setup_free(sctx);
+  return sctx->type->pair_setup_free(sctx);
 }
 
 const char *
@@ -299,73 +301,72 @@ pair_setup_errmsg(struct pair_setup_context *sctx)
 uint8_t *
 pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
 {
-  if (!pair[sctx->type]->pair_setup_request1)
+  if (!sctx->type->pair_setup_request1)
     return NULL;
 
-  return pair[sctx->type]->pair_setup_request1(len, sctx);
+  return sctx->type->pair_setup_request1(len, sctx);
+
+  if (!sctx->type->pair_setup_request1)
+    return NULL;
+
+  return sctx->type->pair_setup_request1(len, sctx);
 }
 
 uint8_t *
 pair_setup_request2(uint32_t *len, struct pair_setup_context *sctx)
 {
-  if (!pair[sctx->type]->pair_setup_request2)
+  if (!sctx->type->pair_setup_request2)
     return NULL;
 
-  return pair[sctx->type]->pair_setup_request2(len, sctx);
+  return sctx->type->pair_setup_request2(len, sctx);
 }
 
 uint8_t *
 pair_setup_request3(uint32_t *len, struct pair_setup_context *sctx)
 {
-  if (!pair[sctx->type]->pair_setup_request3)
+  if (!sctx->type->pair_setup_request3)
     return NULL;
 
-  return pair[sctx->type]->pair_setup_request3(len, sctx);
+  return sctx->type->pair_setup_request3(len, sctx);
 }
 
 int
 pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
-  if (!pair[sctx->type]->pair_setup_response1)
+  if (!sctx->type->pair_setup_response1)
     return -1;
 
-  return pair[sctx->type]->pair_setup_response1(sctx, data, data_len);
+  return sctx->type->pair_setup_response1(sctx, data, data_len);
 }
 
 int
 pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
-  if (!pair[sctx->type]->pair_setup_response2)
+  if (!sctx->type->pair_setup_response2)
     return -1;
 
-  return pair[sctx->type]->pair_setup_response2(sctx, data, data_len);
+  return sctx->type->pair_setup_response2(sctx, data, data_len);
 }
 
 int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint32_t data_len)
 {
-  if (!pair[sctx->type]->pair_setup_response3)
+  if (!sctx->type->pair_setup_response3)
     return -1;
 
-  if (pair[sctx->type]->pair_setup_response3(sctx, data, data_len) != 0)
+  if (sctx->type->pair_setup_response3(sctx, data, data_len) != 0)
     return -1;
 
-  sctx->setup_is_completed = 1;
   return 0;
 }
 
 int
-pair_setup_result(const char **authorisation_key, struct pair_setup_context *sctx)
+pair_setup_result(const char **hexkey, const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx)
 {
-  struct pair_verify_context *vctx;
+  const uint8_t *out_key;
+  size_t out_len;
   char *ptr;
   int i;
-
-  if (sizeof(vctx->client_public_key) != sizeof(sctx->public_key) || sizeof(vctx->client_private_key) != sizeof(sctx->private_key))
-    {
-      sctx->errmsg = "Setup result: Bug!";
-      return -1;
-    }
 
   if (!sctx->setup_is_completed)
     {
@@ -373,36 +374,49 @@ pair_setup_result(const char **authorisation_key, struct pair_setup_context *sct
       return -1;
     }
 
-  // Fills out the auth_key with public + private in hex. It seems that the private
-  // key actually includes the public key (last 32 bytes), so we could in
-  // principle just export the private key
+  if (!sctx->type->pair_setup_result)
+    return -1;
+
+  if (sctx->type->pair_setup_result(&out_key, &out_len, sctx) != 0)
+    return -1;
+
+  if (2 * out_len + 1 > sizeof(sctx->auth_key))
+    return -1;
+
   ptr = sctx->auth_key;
-  for (i = 0; i < sizeof(sctx->public_key); i++)
-    ptr += sprintf(ptr, "%02x", sctx->public_key[i]);
-  for (i = 0; i < sizeof(sctx->private_key); i++)
-    ptr += sprintf(ptr, "%02x", sctx->private_key[i]);
+  for (i = 0; i < out_len; i++)
+    ptr += sprintf(ptr, "%02x", out_key[i]);
   *ptr = '\0';
 
-  *authorisation_key = sctx->auth_key;
+  if (key)
+    *key = out_key;
+  if (key_len)
+    *key_len = out_len;
+  if (hexkey)
+    *hexkey = sctx->auth_key;
+
   return 0;
 }
 
 
 struct pair_verify_context *
-pair_verify_new(enum pair_type type, const char *authorisation_key, const char *device_id)
+pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id)
 {
   struct pair_verify_context *vctx;
   char hex[] = { 0, 0, 0 };
+  size_t hexkey_len;
   const char *ptr;
   int i;
 
   if (sodium_init() == -1)
     return NULL;
 
-  if (!authorisation_key)
+  if (!hexkey)
     return NULL;
 
-  if (strlen(authorisation_key) != 2 * (sizeof(vctx->client_public_key) + sizeof(vctx->client_private_key)))
+  hexkey_len = strlen(hexkey);
+
+  if (hexkey_len != 2 * sizeof(vctx->client_private_key))
     return NULL;
 
   if (device_id && strlen(device_id) != 16)
@@ -412,23 +426,25 @@ pair_verify_new(enum pair_type type, const char *authorisation_key, const char *
   if (!vctx)
     return NULL;
 
-  vctx->type = type;
+  vctx->type = pair[type];
 
   if (device_id)
     memcpy(vctx->device_id, device_id, strlen(device_id));
 
-  ptr = authorisation_key;
-  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
-    {
-      hex[0] = ptr[0];
-      hex[1] = ptr[1];
-      vctx->client_public_key[i] = strtol(hex, NULL, 16);
-    }
+  ptr = hexkey;
   for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
     {
       hex[0] = ptr[0];
       hex[1] = ptr[1];
       vctx->client_private_key[i] = strtol(hex, NULL, 16);
+    }
+
+  ptr = hexkey + hexkey_len - 2 * sizeof(vctx->client_public_key);
+  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_public_key[i] = strtol(hex, NULL, 16);
     }
 
   return vctx;
@@ -452,37 +468,37 @@ pair_verify_errmsg(struct pair_verify_context *vctx)
 uint8_t *
 pair_verify_request1(uint32_t *len, struct pair_verify_context *vctx)
 {
-  if (!pair[vctx->type]->pair_verify_request1)
+  if (!vctx->type->pair_verify_request1)
     return NULL;
 
-  return pair[vctx->type]->pair_verify_request1(len, vctx);
+  return vctx->type->pair_verify_request1(len, vctx);
 }
 
 uint8_t *
 pair_verify_request2(uint32_t *len, struct pair_verify_context *vctx)
 {
-  if (!pair[vctx->type]->pair_verify_request2)
+  if (!vctx->type->pair_verify_request2)
     return NULL;
 
-  return pair[vctx->type]->pair_verify_request2(len, vctx);
+  return vctx->type->pair_verify_request2(len, vctx);
 }
 
 int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
 {
-  if (!pair[vctx->type]->pair_verify_response1)
+  if (!vctx->type->pair_verify_response1)
     return -1;
 
-  return pair[vctx->type]->pair_verify_response1(vctx, data, data_len);
+  return vctx->type->pair_verify_response1(vctx, data, data_len);
 }
 
 int
 pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len)
 {
-  if (!pair[vctx->type]->pair_verify_response2)
+  if (!vctx->type->pair_verify_response2)
     return -1;
 
-  if (pair[vctx->type]->pair_verify_response2(vctx, data, data_len) != 0)
+  if (vctx->type->pair_verify_response2(vctx, data, data_len) != 0)
     return -1;
 
   vctx->verify_is_completed = 1;
@@ -510,12 +526,12 @@ pair_verify_result(uint8_t *shared_secret, size_t shared_secret_len, struct pair
 }
 
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, int channel, uint8_t *shared_secret, size_t shared_secret_len)
+pair_cipher_new(enum pair_type type, int channel, const uint8_t *shared_secret, size_t shared_secret_len)
 {
   if (!pair[type]->pair_cipher_new)
     return NULL;
 
-  return pair[type]->pair_cipher_new(type, channel, shared_secret, shared_secret_len);
+  return pair[type]->pair_cipher_new(pair[type], channel, shared_secret, shared_secret_len);
 }
 
 void
@@ -524,10 +540,10 @@ pair_cipher_free(struct pair_cipher_context *cctx)
   if (!cctx)
     return;
 
-  if (!pair[cctx->type]->pair_cipher_free)
+  if (!cctx->type->pair_cipher_free)
     return;
 
-  return pair[cctx->type]->pair_cipher_free(cctx);
+  return cctx->type->pair_cipher_free(cctx);
 }
 
 const char *
@@ -539,17 +555,17 @@ pair_cipher_errmsg(struct pair_cipher_context *cctx)
 int
 pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx)
 {
-  if (!pair[cctx->type]->pair_encrypt)
+  if (!cctx->type->pair_encrypt)
     return 0;
 
-  return pair[cctx->type]->pair_encrypt(ciphertext, ciphertext_len, plaintext, plaintext_len, cctx);
+  return cctx->type->pair_encrypt(ciphertext, ciphertext_len, plaintext, plaintext_len, cctx);
 }
 
 int
 pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx)
 {
-  if (!pair[cctx->type]->pair_decrypt)
+  if (!cctx->type->pair_decrypt)
     return 0;
 
-  return pair[cctx->type]->pair_decrypt(plaintext, plaintext_len, ciphertext, ciphertext_len, cctx);
+  return cctx->type->pair_decrypt(plaintext, plaintext_len, ciphertext, ciphertext_len, cctx);
 }

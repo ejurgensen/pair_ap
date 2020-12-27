@@ -116,6 +116,14 @@ enum pair_method {
   PairingMethodListPairings       = 0x05
 };
 
+enum pair_flags {
+  PairingFlagsTransient           = 0x10,
+};
+
+// Forwards
+const struct pair_definition pair_homekit_normal;
+const struct pair_definition pair_homekit_transient;
+
 
 /* ---------------------------------- SRP ----------------------------------- */
 
@@ -505,6 +513,7 @@ typedef enum {
     TLVType_FragmentData = 13, // (bytes) Non-last fragment of data. If length is 0,
                                // it's an ACK.
     TLVType_FragmentLast = 14, // (bytes) Last fragment of data
+    TLVType_Flags = 19,        // Added from airplay2_receiver
     TLVType_Separator = 0xff,
 } TLVType;
 
@@ -1020,15 +1029,22 @@ create_and_sign_device_info(uint8_t *data, size_t *data_len, const char *device_
 /* -------------------------- IMPLEMENTATION -------------------------------- */
 
 static struct pair_setup_context *
-pair_setup_new(int type, const char *pin, const char *device_id)
+pair_setup_new(struct pair_definition *type, const char *pin, const char *device_id)
 {
   struct pair_setup_context *sctx;
 
   if (sodium_init() == -1)
     return NULL;
 
-  if (!pin || strlen(pin) < 4)
-    return NULL;
+  if (type == &pair_homekit_normal)
+    {
+      if (!pin || strlen(pin) < 4)
+	return NULL;
+    }
+  else if (type == &pair_homekit_transient && !pin)
+    {
+      pin = "3939";
+    }
 
   if (device_id && strlen(device_id) != 16)
     return NULL;
@@ -1071,6 +1087,7 @@ pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
   uint8_t *data;
   size_t data_len;
   uint8_t method;
+  uint8_t flags;
   int endian_test = 1;
   int ret;
 
@@ -1095,6 +1112,12 @@ pair_setup_request1(uint32_t *len, struct pair_setup_context *sctx)
   method = PairingMethodPairSetup;
   tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG01].state, sizeof(pair_keys_map[PAIR_SETUP_MSG01].state));
   tlv_add_value(request, TLVType_Method, &method, sizeof(method));
+
+  if (sctx->type == &pair_homekit_transient)
+    {
+      flags = PairingFlagsTransient;
+      tlv_add_value(request, TLVType_Flags, &flags, sizeof(flags));
+    }
 
   ret = tlv_format(request, data, &data_len);
   if (ret < 0)
@@ -1329,6 +1352,10 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint3
     }
 
   tlv_free(response);
+
+  if (sctx->type == &pair_homekit_transient)
+    sctx->setup_is_completed = 1;
+
   return 0;
 
  error:
@@ -1410,11 +1437,42 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint3
 
   free(decrypted_data);
   tlv_free(response);
+
+  sctx->setup_is_completed = 1;
   return 0;
 
  error:
   free(decrypted_data);
   tlv_free(response);
+  return -1;
+}
+
+static int
+pair_setup_result(const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx)
+{
+  const uint8_t *session_key;
+  int session_key_len;
+
+  if (sctx->type == &pair_homekit_normal)
+    {
+      // Last 32 bytes of private key should match public key, but check assumption
+      if (memcmp(sctx->private_key + sizeof(sctx->private_key) - sizeof(sctx->public_key), sctx->public_key, sizeof(sctx->public_key)) != 0)
+	{
+	  sctx->errmsg = "Pair setup result: Unexpected keys, private key does not match public key";
+	  return -1;
+	}
+      *key = sctx->private_key;
+      *key_len = sizeof(sctx->private_key);
+      return 0;
+    }
+  if (sctx->type == &pair_homekit_transient)
+    {
+      session_key = srp_user_get_session_key(sctx->user, &session_key_len);
+      *key = session_key;
+      *key_len = session_key_len;
+      return 0;
+    }
+
   return -1;
 }
 
@@ -1635,7 +1693,7 @@ pair_cipher_free(struct pair_cipher_context *cctx)
 }
 
 static struct pair_cipher_context *
-pair_cipher_new(int type, int channel, uint8_t *shared_secret, size_t shared_secret_len)
+pair_cipher_new(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len)
 {
   struct pair_cipher_context *cctx;
   enum pair_keys write_key;
@@ -1778,10 +1836,11 @@ pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, si
   return 0;
 }
 
-struct pair_definition pair_homekit =
+const struct pair_definition pair_homekit_normal =
 {
   .pair_setup_new = pair_setup_new,
   .pair_setup_free = pair_setup_free,
+  .pair_setup_result = pair_setup_result,
 
   .pair_setup_request1 = pair_setup_request1,
   .pair_setup_request2 = pair_setup_request2,
@@ -1803,3 +1862,5 @@ struct pair_definition pair_homekit =
   .pair_encrypt = pair_encrypt,
   .pair_decrypt = pair_decrypt,
 };
+
+const struct pair_definition pair_homekit_transient = pair_homekit_normal;

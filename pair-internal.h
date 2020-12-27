@@ -5,7 +5,7 @@ struct SRPUser;
 
 struct pair_setup_context
 {
-  int type;
+  struct pair_definition *type;
 
   struct SRPUser *user;
 
@@ -43,7 +43,7 @@ struct pair_setup_context
 
 struct pair_verify_context
 {
-  int type;
+  struct pair_definition *type;
 
   char device_id[17]; // Incl. zero term
 
@@ -64,7 +64,7 @@ struct pair_verify_context
 
 struct pair_cipher_context
 {
-  int type;
+  struct pair_definition *type;
 
   uint8_t encryption_key[32];
   uint8_t decryption_key[32];
@@ -77,8 +77,9 @@ struct pair_cipher_context
 
 struct pair_definition
 {
-  struct pair_setup_context *(*pair_setup_new)(int type, const char *pin, const char *device_id);
+  struct pair_setup_context *(*pair_setup_new)(struct pair_definition *type, const char *pin, const char *device_id);
   void (*pair_setup_free)(struct pair_setup_context *sctx);
+  int (*pair_setup_result)(const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx);
 
   uint8_t *(*pair_setup_request1)(uint32_t *len, struct pair_setup_context *sctx);
   uint8_t *(*pair_setup_request2)(uint32_t *len, struct pair_setup_context *sctx);
@@ -94,7 +95,7 @@ struct pair_definition
   int (*pair_verify_response1)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
   int (*pair_verify_response2)(struct pair_verify_context *vctx, const uint8_t *data, uint32_t data_len);
 
-  struct pair_cipher_context *(*pair_cipher_new)(int type, int channel, uint8_t *shared_secret, size_t shared_secret_len);
+  struct pair_cipher_context *(*pair_cipher_new)(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);
 
   int (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
