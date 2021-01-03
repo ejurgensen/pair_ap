@@ -234,5 +234,7 @@ hash_num(enum hash_alg alg, const bnum n, unsigned char *dest);
 
 /* ----------------------------- OTHER HELPERS -------------------------------*/
 
+#ifdef DEBUG_PAIR
 void
 hexdump(const char *msg, uint8_t *mem, size_t len);
+#endif
