@@ -81,7 +81,7 @@ struct pair_keys_map
   const char nonce[8];
 };
 
-struct pair_keys_map pair_keys_map[] =
+static struct pair_keys_map pair_keys_map[] =
 {
   // Used for /pair-setup
   { 0x01, NULL, NULL, "" },
@@ -1701,8 +1701,25 @@ pair_cipher_new(struct pair_definition *type, int channel, const uint8_t *shared
   int ret;
 
   // Note that events is opposite, probably because it is a reverse connection
-  write_key = (channel == 0) ? PAIR_CONTROL_WRITE : PAIR_EVENTS_READ;
-  read_key = (channel == 0) ? PAIR_CONTROL_READ : PAIR_EVENTS_WRITE;
+  switch (channel)
+    {
+      case 0:
+	write_key = PAIR_CONTROL_WRITE;
+	read_key = PAIR_CONTROL_READ;
+	break;
+      case 1:
+	write_key = PAIR_EVENTS_READ;
+	read_key = PAIR_EVENTS_WRITE;
+	break;
+      case 2:
+	write_key = PAIR_CONTROL_READ;
+	read_key = PAIR_CONTROL_WRITE;
+	break;
+      case 3:
+	write_key = PAIR_EVENTS_WRITE;
+	read_key = PAIR_EVENTS_READ;
+	break;
+    }
 
   cctx = calloc(1, sizeof(struct pair_cipher_context));
   if (!cctx)
