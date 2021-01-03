@@ -564,3 +564,15 @@ pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, si
 
   return cctx->type->pair_decrypt(plaintext, plaintext_len, ciphertext, ciphertext_len, cctx);
 }
+
+void
+pair_encrypt_rollback(struct pair_cipher_context *cctx)
+{
+  cctx->encryption_counter--;
+}
+
+void
+pair_decrypt_rollback(struct pair_cipher_context *cctx)
+{
+  cctx->decryption_counter--;
+}

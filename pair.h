@@ -107,4 +107,11 @@ pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, s
 int
 pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
 
+/* Rolls back the nonce
+ */
+void
+pair_encrypt_rollback(struct pair_cipher_context *cctx);
+void
+pair_decrypt_rollback(struct pair_cipher_context *cctx);
+
 #endif  /* !__PAIR_AP_H__ */
