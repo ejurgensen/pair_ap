@@ -1719,6 +1719,8 @@ pair_cipher_new(struct pair_definition *type, int channel, const uint8_t *shared
 	write_key = PAIR_EVENTS_WRITE;
 	read_key = PAIR_EVENTS_READ;
 	break;
+      default:
+	return NULL;
     }
 
   cctx = calloc(1, sizeof(struct pair_cipher_context));
