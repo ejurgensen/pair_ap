@@ -227,7 +227,7 @@ static int
 verify_step2_request(void)
 {
   uint8_t *request;
-  uint32_t len;
+  size_t len;
   int ret;
 
   request = pair_verify_request2(&len, verify_ctx);
@@ -271,7 +271,7 @@ static int
 verify_step1_request(const char *authorisation_key)
 {
   uint8_t *request = NULL;
-  uint32_t len;
+  size_t len;
   int ret;
 
   verify_ctx = pair_verify_new(pair_type, authorisation_key, DEVICE_ID);
@@ -335,7 +335,7 @@ static int
 setup_step3_request(void)
 {
   uint8_t *request;
-  uint32_t len;
+  size_t len;
   int ret;
 
   request = pair_setup_request3(&len, setup_ctx);
@@ -404,7 +404,7 @@ static int
 setup_step2_request(void)
 {
   uint8_t *request;
-  uint32_t len;
+  size_t len;
   int ret;
 
   request = pair_setup_request2(&len, setup_ctx);
@@ -448,7 +448,7 @@ static int
 setup_step1_request(void)
 {
   uint8_t *request;
-  uint32_t len;
+  size_t len;
   int ret;
 
   request = pair_setup_request1(&len, setup_ctx);
