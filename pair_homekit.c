@@ -767,7 +767,7 @@ response_process(const uint8_t *data, uint32_t data_len, const char **errmsg)
   if (error)
     {
       if (error->value[0] == TLVError_Authentication)
-	*errmsg = "Device returned an authtication failure";
+	*errmsg = "Device returned an authentication failure";
       else if (error->value[0] == TLVError_Backoff)
 	*errmsg = "Device told us to back off pairing attempts\n";
       else if (error->value[0] == TLVError_MaxPeers)
@@ -1291,7 +1291,6 @@ pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, uint3
   response = response_process(data, data_len, &sctx->errmsg);
   if (!response)
     {
-      sctx->errmsg = "Setup response 1: Could not parse TLV";
       return -1;
     }
 
@@ -1328,7 +1327,6 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, uint3
   response = response_process(data, data_len, &sctx->errmsg);
   if (!response)
     {
-      sctx->errmsg = "Setup response 2: Could not parse TLV";
       return -1;
     }
 
@@ -1380,7 +1378,6 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint3
   response = response_process(data, data_len, &sctx->errmsg);
   if (!response)
     {
-      sctx->errmsg = "Setup response 3: Could not parse TLV";
       return -1;
     }
 
@@ -1429,7 +1426,6 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, uint3
   response = response_process(decrypted_data, encrypted_len, &sctx->errmsg);
   if (!response)
     {
-      sctx->errmsg = "Setup response 3: Could not parse decrypted TLV";
       goto error;
     }
 
@@ -1603,7 +1599,6 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
   response = response_process(data, data_len, &vctx->errmsg);
   if (!response)
     {
-      vctx->errmsg = "Verify response 1: Could not parse TLV";
       return -1;
     }
 
@@ -1660,7 +1655,6 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, uin
   response = response_process(decrypted_data, encrypted_len, &vctx->errmsg);
   if (!response)
     {
-      vctx->errmsg = "Verify response 1: Could not parse decrypted TLV";
       goto error;
     }
 
