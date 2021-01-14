@@ -159,22 +159,26 @@ rtsp_cipher(struct evbuffer *evbuf, void *arg, int encrypt)
 {
   uint8_t *out = NULL;
   size_t out_len = 0;
-  int ret;
+  ssize_t processed;
 
   uint8_t *in = evbuffer_pullup(evbuf, -1);
   size_t in_len = evbuffer_get_length(evbuf);
 
   if (encrypt)
-    ret = pair_encrypt(&out, &out_len, in, in_len, cipher_ctx);
+    processed = pair_encrypt(&out, &out_len, in, in_len, cipher_ctx);
   else
-    ret = pair_decrypt(&out, &out_len, in, in_len, cipher_ctx);
+    processed = pair_decrypt(&out, &out_len, in, in_len, cipher_ctx);
 
   evbuffer_drain(evbuf, in_len);
 
-  if (ret < 0)
+  if (processed < 0)
     {
       printf("Error while ciphering: %s\n", pair_cipher_errmsg(cipher_ctx));
       return;
+    }
+  else if (processed != in_len)
+    {
+      printf("Partial ciphering, only %zd of %zu input bytes were processed\n", processed, in_len);
     }
 
   evbuffer_add(evbuf, out, out_len);
