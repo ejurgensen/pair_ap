@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#define PAIR_AP_VERSION_MAJOR 0
+#define PAIR_AP_VERSION_MINOR 1
+
 enum pair_type
 {
   // This is the pairing type required for Apple TV device verification, which
