@@ -1,3 +1,4 @@
 *.o
 .dirstamp
-pair-example
+client-example
+server-example
