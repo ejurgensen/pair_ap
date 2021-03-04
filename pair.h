@@ -10,13 +10,14 @@ enum pair_type
 {
   // This is the pairing type required for Apple TV device verification, which
   // became mandatory with tvOS 10.2.
-  PAIR_FRUIT,
+  PAIR_CLIENT_FRUIT,
   // This is the Homekit type required for AirPlay 2 with both PIN setup and
   // verification
-  PAIR_HOMEKIT_NORMAL,
+  PAIR_CLIENT_HOMEKIT_NORMAL,
   // Same as normal except PIN is fixed to 3939 and stops after setup step 2,
   // when session key is established
-  PAIR_HOMEKIT_TRANSIENT,
+  PAIR_CLIENT_HOMEKIT_TRANSIENT,
+  PAIR_SERVER_HOMEKIT_TRANSIENT,
 };
 
 struct pair_setup_context;
@@ -36,6 +37,7 @@ pair_setup_free(struct pair_setup_context *sctx);
  */
 const char *
 pair_setup_errmsg(struct pair_setup_context *sctx);
+
 
 uint8_t *
 pair_setup_request1(size_t *len, struct pair_setup_context *sctx);
@@ -90,6 +92,7 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, siz
  */
 int
 pair_verify_result(const uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx);
+
 
 /* When you have completed the verification you can extract a key with
  * pair_verify_result(). Give the shared secret as input to this function to

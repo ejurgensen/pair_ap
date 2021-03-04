@@ -94,9 +94,9 @@ make_request(const char *url, const void *data, size_t len, const char *content_
 //  evrtsp_add_header(req->output_headers, "DACP-ID", DACP_ID);
 //  evrtsp_add_header(req->output_headers, "Active-Remote", ACTIVE_REMOTE);
 
-  if (pair_type == PAIR_HOMEKIT_NORMAL)
+  if (pair_type == PAIR_CLIENT_HOMEKIT_NORMAL)
     evrtsp_add_header(req->output_headers, "X-Apple-HKP", "3");
-  else if (pair_type == PAIR_HOMEKIT_TRANSIENT)
+  else if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT)
     evrtsp_add_header(req->output_headers, "X-Apple-HKP", "4");
 
   printf("Making request %d to '%s'... ", cseq, url);
@@ -371,7 +371,7 @@ setup_step2_response(struct evrtsp_request *req, void *arg)
 
   printf("Setup SRP stage complete\n");
 
-  if (pair_type == PAIR_HOMEKIT_TRANSIENT)
+  if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT)
     {
       ret = pair_setup_result(NULL, &transient_key, &transient_key_len, setup_ctx);
       if (ret < 0)
@@ -479,7 +479,7 @@ setup_start_response(struct evrtsp_request *req, void *arg)
 	goto error;
     }
 
-  if (pair_type != PAIR_HOMEKIT_TRANSIENT)
+  if (pair_type != PAIR_CLIENT_HOMEKIT_TRANSIENT)
     {
       pin = prompt_pin();
       if (!pin)
@@ -530,21 +530,21 @@ main( int argc, char * argv[] )
   if (strcmp(argv[3], "fruit") == 0)
     {
       printf("Pair type is fruit\n");
-      pair_type = PAIR_FRUIT;
+      pair_type = PAIR_CLIENT_FRUIT;
       endpoint_setup = ENDPOINT_SETUP_FRUIT;
       content_type_setup = CONTENTTYPE_SETUP_FRUIT;
     }
   else if (strcmp(argv[3], "homekit") == 0)
     {
       printf("Pair type is homekit (normal)\n");
-      pair_type = PAIR_HOMEKIT_NORMAL;
+      pair_type = PAIR_CLIENT_HOMEKIT_NORMAL;
       endpoint_setup = ENDPOINT_SETUP_HOMEKIT;
       content_type_setup = CONTENTTYPE_SETUP_HOMEKIT;
     }
   else if (strcmp(argv[3], "transient") == 0)
     {
       printf("Pair type is homekit (transient)\n");
-      pair_type = PAIR_HOMEKIT_TRANSIENT;
+      pair_type = PAIR_CLIENT_HOMEKIT_TRANSIENT;
       endpoint_setup = ENDPOINT_SETUP_HOMEKIT;
       content_type_setup = CONTENTTYPE_SETUP_HOMEKIT;
     }
@@ -553,7 +553,7 @@ main( int argc, char * argv[] )
   evcon = evrtsp_connection_new(address, atoi(port));
   evrtsp_connection_set_base(evcon, evbase);
 
-  if (pair_type == PAIR_HOMEKIT_TRANSIENT || skip_pin)
+  if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT || skip_pin)
     {
       setup_start_response(NULL, NULL);
     }

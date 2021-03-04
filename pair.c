@@ -31,15 +31,17 @@
 #include "pair.h"
 #include "pair-internal.h"
 
-extern struct pair_definition pair_fruit;
-extern struct pair_definition pair_homekit_normal;
-extern struct pair_definition pair_homekit_transient;
+extern struct pair_definition pair_client_fruit;
+extern struct pair_definition pair_client_homekit_normal;
+extern struct pair_definition pair_client_homekit_transient;
+extern struct pair_definition pair_server_homekit_transient;
 
 // Must be in sync with enum pair_type
 static struct pair_definition *pair[] = {
-    &pair_fruit,
-    &pair_homekit_normal,
-    &pair_homekit_transient,
+    &pair_client_fruit,
+    &pair_client_homekit_normal,
+    &pair_client_homekit_transient,
+    &pair_server_homekit_transient,
 };
 
 /* -------------------------- SHARED HASHING HELPERS ------------------------ */
@@ -274,10 +276,24 @@ hexdump(const char *msg, uint8_t *mem, size_t len)
 struct pair_setup_context *
 pair_setup_new(enum pair_type type, const char *pin, const char *device_id)
 {
+  struct pair_setup_context *sctx;
+
   if (!pair[type]->pair_setup_new)
     return NULL;
 
-  return pair[type]->pair_setup_new(pair[type], pin, device_id);
+  sctx = calloc(1, sizeof(struct pair_setup_context));
+  if (sctx)
+    return NULL;
+
+  sctx->type = pair[type];
+
+  if (pair[type]->pair_setup_new(sctx, pin, device_id) < 0)
+    {
+      free(sctx);
+      return NULL;
+    }
+
+  return sctx;
 }
 
 void
@@ -286,10 +302,12 @@ pair_setup_free(struct pair_setup_context *sctx)
   if (!sctx)
     return;
 
-  if (!sctx->type->pair_setup_free)
-    return;
+  if (sctx->type->pair_setup_free)
+    sctx->type->pair_setup_free(sctx);
 
-  return sctx->type->pair_setup_free(sctx);
+  free(sctx);
+
+  return;
 }
 
 const char *
