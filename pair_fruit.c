@@ -859,9 +859,55 @@ pair_client_setup_result(const uint8_t **key, size_t *key_len, struct pair_setup
 }
 
 
-static uint8_t *
-pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
+static int
+pair_client_verify_new(struct pair_verify_context *handle, const char *hexkey, const char *device_id)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
+  char hex[] = { 0, 0, 0 };
+  size_t hexkey_len;
+  const char *ptr;
+  int i;
+
+  if (sodium_init() == -1)
+    return -1;
+
+  if (!hexkey)
+    return -1;
+
+  hexkey_len = strlen(hexkey);
+
+  if (hexkey_len != 2 * sizeof(vctx->client_private_key))
+    return -1;
+
+  if (device_id && strlen(device_id) != 16)
+    return -1;
+
+  if (device_id)
+    memcpy(vctx->device_id, device_id, strlen(device_id));
+
+  ptr = hexkey;
+  for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_private_key[i] = strtol(hex, NULL, 16);
+    }
+
+  ptr = hexkey + hexkey_len - 2 * sizeof(vctx->client_public_key);
+  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_public_key[i] = strtol(hex, NULL, 16);
+    }
+
+  return 0;
+}
+
+static uint8_t *
+pair_client_verify_request1(size_t *len, struct pair_verify_context *handle)
+{
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   const uint8_t basepoint[32] = {9};
   uint8_t *data;
   int ret;
@@ -869,7 +915,7 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
   ret = crypto_scalarmult(vctx->client_eph_public_key, vctx->client_eph_private_key, basepoint);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 1: Curve 25519 returned an error";
+      handle->errmsg = "Verify request 1: Curve 25519 returned an error";
       return NULL;
     }
 
@@ -877,7 +923,7 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
   data = calloc(1, *len);
   if (!data)
     {
-      vctx->errmsg = "Verify request 1: Out of memory";
+      handle->errmsg = "Verify request 1: Out of memory";
       return NULL;
     }
 
@@ -889,8 +935,9 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
 }
 
 static uint8_t *
-pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
+pair_client_verify_request2(size_t *len, struct pair_verify_context *handle)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   uint8_t shared_secret[crypto_scalarmult_BYTES];
   uint8_t key[SHA512_DIGEST_LENGTH];
   uint8_t iv[SHA512_DIGEST_LENGTH];
@@ -904,7 +951,7 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
   data = calloc(1, *len);
   if (!data)
     {
-      vctx->errmsg = "Verify request 2: Out of memory";
+      handle->errmsg = "Verify request 2: Out of memory";
       return NULL;
     }
 
@@ -918,28 +965,28 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
   ret = crypto_scalarmult(shared_secret, vctx->client_eph_private_key, vctx->server_eph_public_key);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: Curve 25519 returned an error";
+      handle->errmsg = "Verify request 2: Curve 25519 returned an error";
       return NULL;
     }
 
   ret = hash_ab(HASH_SHA512, key, (unsigned char *)AES_VERIFY_KEY, strlen(AES_VERIFY_KEY), shared_secret, sizeof(shared_secret));
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: Hashing of key string and shared secret failed";
+      handle->errmsg = "Verify request 2: Hashing of key string and shared secret failed";
       return NULL;
     }
 
   ret = hash_ab(HASH_SHA512, iv, (unsigned char *)AES_VERIFY_IV, strlen(AES_VERIFY_IV), shared_secret, sizeof(shared_secret));
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: Hashing of iv string and shared secret failed";
+      handle->errmsg = "Verify request 2: Hashing of iv string and shared secret failed";
       return NULL;
     }
 
   ret = encrypt_ctr(encrypted, sizeof(encrypted), vctx->server_public_key, sizeof(vctx->server_public_key), signature, sizeof(signature), key, iv, &errmsg);
   if (ret < 0)
     {
-      vctx->errmsg = errmsg;
+      handle->errmsg = errmsg;
       return NULL;
     }
 
@@ -947,7 +994,7 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
   data = calloc(1, *len);
   if (!data)
     {
-      vctx->errmsg = "Verify request 2: Out of memory";
+      handle->errmsg = "Verify request 2: Out of memory";
       return NULL;
     }
 
@@ -957,14 +1004,15 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
 }
 
 static int
-pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
+pair_client_verify_response1(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   size_t wanted;
 
   wanted = sizeof(vctx->server_eph_public_key) + sizeof(vctx->server_public_key);
   if (data_len < wanted)
     {
-      vctx->errmsg = "Verify response 2: Unexpected response (too short)";
+      handle->errmsg = "Verify response 2: Unexpected response (too short)";
       return -1;
     }
 
@@ -975,11 +1023,23 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
 }
 
 static int
-pair_client_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
+pair_client_verify_response2(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
   // TODO actually check response
   return 0;
 }
+
+static int
+pair_client_verify_result(const uint8_t **key, size_t *key_len, struct pair_verify_context *handle)
+{
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
+
+  *key = vctx->shared_secret;
+  *key_len = sizeof(vctx->shared_secret);
+
+  return 0;
+}
+
 
 struct pair_definition pair_client_fruit =
 {
@@ -994,6 +1054,9 @@ struct pair_definition pair_client_fruit =
   .pair_setup_response1 = pair_client_setup_response1,
   .pair_setup_response2 = pair_client_setup_response2,
   .pair_setup_response3 = pair_client_setup_response3,
+
+  .pair_verify_new = pair_client_verify_new,
+  .pair_verify_result = pair_client_verify_result,
 
   .pair_verify_request1 = pair_client_verify_request1,
   .pair_verify_request2 = pair_client_verify_request2,

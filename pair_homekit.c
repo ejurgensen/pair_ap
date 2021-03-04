@@ -1505,9 +1505,55 @@ pair_client_setup_result(const uint8_t **key, size_t *key_len, struct pair_setup
   return -1;
 }
 
-static uint8_t *
-pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
+static int
+pair_client_verify_new(struct pair_verify_context *handle, const char *hexkey, const char *device_id)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
+  char hex[] = { 0, 0, 0 };
+  size_t hexkey_len;
+  const char *ptr;
+  int i;
+
+  if (sodium_init() == -1)
+    return -1;
+
+  if (!hexkey)
+    return -1;
+
+  hexkey_len = strlen(hexkey);
+
+  if (hexkey_len != 2 * sizeof(vctx->client_private_key))
+    return -1;
+
+  if (device_id && strlen(device_id) != 16)
+    return -1;
+
+  if (device_id)
+    memcpy(vctx->device_id, device_id, strlen(device_id));
+
+  ptr = hexkey;
+  for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_private_key[i] = strtol(hex, NULL, 16);
+    }
+
+  ptr = hexkey + hexkey_len - 2 * sizeof(vctx->client_public_key);
+  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
+    {
+      hex[0] = ptr[0];
+      hex[1] = ptr[1];
+      vctx->client_public_key[i] = strtol(hex, NULL, 16);
+    }
+
+  return 0;
+}
+
+static uint8_t *
+pair_client_verify_request1(size_t *len, struct pair_verify_context *handle)
+{
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   const uint8_t basepoint[32] = {9};
   pair_tlv_values_t *request;
   uint8_t *data;
@@ -1521,7 +1567,7 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
   ret = crypto_scalarmult(vctx->client_eph_public_key, vctx->client_eph_private_key, basepoint);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 1: Curve 25519 returned an error";
+      handle->errmsg = "Verify request 1: Curve 25519 returned an error";
       goto error;
     }
 
@@ -1531,7 +1577,7 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
   ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 1: pair_tlv_format returned an error";
+      handle->errmsg = "Verify request 1: pair_tlv_format returned an error";
       goto error;
     }
 
@@ -1547,8 +1593,9 @@ pair_client_verify_request1(size_t *len, struct pair_verify_context *vctx)
 }
 
 static uint8_t *
-pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
+pair_client_verify_request2(size_t *len, struct pair_verify_context *handle)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
@@ -1567,14 +1614,14 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
                                     vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key), vctx->client_private_key);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: error creating signed device info";
+      handle->errmsg = "Verify request 2: error creating signed device info";
       goto error;
     }
 
   ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), PAIR_VERIFY_MSG03);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: hkdf error getting derived_key";
+      handle->errmsg = "Verify request 2: hkdf error getting derived_key";
       goto error;
     }
 
@@ -1586,7 +1633,7 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: Could not encrypt";
+      handle->errmsg = "Verify request 2: Could not encrypt";
       goto error;
     }
 
@@ -1599,7 +1646,7 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
   ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: pair_tlv_format returned an error";
+      handle->errmsg = "Verify request 2: pair_tlv_format returned an error";
       goto error;
     }
 
@@ -1617,8 +1664,9 @@ pair_client_verify_request2(size_t *len, struct pair_verify_context *vctx)
 }
 
 static int
-pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
+pair_client_verify_response1(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
   pair_tlv_values_t *response;
   pair_tlv_t *encrypted_data;
   pair_tlv_t *public_key;
@@ -1629,7 +1677,7 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
   uint8_t *decrypted_data = NULL;
   int ret;
 
-  response = message_process(data, data_len, &vctx->errmsg);
+  response = message_process(data, data_len, &handle->errmsg);
   if (!response)
     {
       return -1;
@@ -1638,14 +1686,14 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
   encrypted_data = pair_tlv_get_value(response, TLVType_EncryptedData);
   if (!encrypted_data)
     {
-      vctx->errmsg = "Verify response 1: Missing encrypted_data";
+      handle->errmsg = "Verify response 1: Missing encrypted_data";
       goto error;
     }
 
   public_key = pair_tlv_get_value(response, TLVType_PublicKey);
   if (!public_key || public_key->size != sizeof(vctx->server_eph_public_key))
     {
-      vctx->errmsg = "Verify response 1: Missing or invalid public_key";
+      handle->errmsg = "Verify response 1: Missing or invalid public_key";
       goto error;
     }
 
@@ -1653,21 +1701,21 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
   ret = crypto_scalarmult(vctx->shared_secret, vctx->client_eph_private_key, vctx->server_eph_public_key);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify response 1: Curve 25519 returned an error";
+      handle->errmsg = "Verify response 1: Curve 25519 returned an error";
       goto error;
     }
 
   ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), PAIR_VERIFY_MSG02);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify response 1: hkdf error getting derived_key";
+      handle->errmsg = "Verify response 1: hkdf error getting derived_key";
       goto error;
     }
 
   // encrypted_data->value consists of the encrypted payload + the auth tag
   if (encrypted_data->size < AUTHTAG_LENGTH)
     {
-      vctx->errmsg = "Verify response 1: Invalid encrypted data";
+      handle->errmsg = "Verify response 1: Invalid encrypted data";
       goto error;
     }
 
@@ -1680,12 +1728,12 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify response 1: Decryption error";
+      handle->errmsg = "Verify response 1: Decryption error";
       goto error;
     }
 
   pair_tlv_free(response);
-  response = message_process(decrypted_data, encrypted_len, &vctx->errmsg);
+  response = message_process(decrypted_data, encrypted_len, &handle->errmsg);
   if (!response)
     {
       goto error;
@@ -1704,9 +1752,20 @@ pair_client_verify_response1(struct pair_verify_context *vctx, const uint8_t *da
 }
 
 static int
-pair_client_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
+pair_client_verify_response2(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
   // TODO actually check response
+  return 0;
+}
+
+static int
+pair_client_verify_result(const uint8_t **key, size_t *key_len, struct pair_verify_context *handle)
+{
+  struct pair_client_verify_context *vctx = &handle->vctx.client;
+
+  *key = vctx->shared_secret;
+  *key_len = sizeof(vctx->shared_secret);
+
   return 0;
 }
 
@@ -2131,6 +2190,9 @@ const struct pair_definition pair_client_homekit_normal =
   .pair_setup_response2 = pair_client_setup_response2,
   .pair_setup_response3 = pair_client_setup_response3,
 
+  .pair_verify_new = pair_client_verify_new,
+  .pair_verify_result = pair_client_verify_result,
+
   .pair_verify_request1 = pair_client_verify_request1,
   .pair_verify_request2 = pair_client_verify_request2,
 
@@ -2157,6 +2219,9 @@ const struct pair_definition pair_client_homekit_transient =
   .pair_setup_response1 = pair_client_setup_response1,
   .pair_setup_response2 = pair_client_setup_response2,
   .pair_setup_response3 = pair_client_setup_response3,
+
+  .pair_verify_new = pair_client_verify_new,
+  .pair_verify_result = pair_client_verify_result,
 
   .pair_verify_request1 = pair_client_verify_request1,
   .pair_verify_request2 = pair_client_verify_request2,

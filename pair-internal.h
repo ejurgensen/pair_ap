@@ -81,10 +81,8 @@ struct pair_setup_context
   } sctx;
 };
 
-struct pair_verify_context
+struct pair_client_verify_context
 {
-  struct pair_definition *type;
-
   char device_id[17]; // Incl. zero term
 
   uint8_t server_eph_public_key[32];
@@ -97,11 +95,20 @@ struct pair_verify_context
   uint8_t client_eph_private_key[32];
 
   uint8_t shared_secret[32];
+};
+
+struct pair_verify_context
+{
+  struct pair_definition *type;
 
   int verify_is_completed;
   const char *errmsg;
-};
 
+  union pair_verify_union
+  {
+    struct pair_client_verify_context client;
+  } vctx;
+};
 
 struct pair_cipher_context
 {
@@ -133,6 +140,10 @@ struct pair_definition
   int (*pair_setup_response1)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
   int (*pair_setup_response2)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
   int (*pair_setup_response3)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
+
+  int (*pair_verify_new)(struct pair_verify_context *vctx, const char *hexkey, const char *device_id);
+  void (*pair_verify_free)(struct pair_verify_context *vctx);
+  int (*pair_verify_result)(const uint8_t **key, size_t *key_len, struct pair_verify_context *vctx);
 
   uint8_t *(*pair_verify_request1)(size_t *len, struct pair_verify_context *vctx);
   uint8_t *(*pair_verify_request2)(size_t *len, struct pair_verify_context *vctx);

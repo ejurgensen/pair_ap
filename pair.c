@@ -282,7 +282,7 @@ pair_setup_new(enum pair_type type, const char *pin, const char *device_id)
     return NULL;
 
   sctx = calloc(1, sizeof(struct pair_setup_context));
-  if (sctx)
+  if (!sctx)
     return NULL;
 
   sctx->type = pair[type];
@@ -306,8 +306,6 @@ pair_setup_free(struct pair_setup_context *sctx)
     sctx->type->pair_setup_free(sctx);
 
   free(sctx);
-
-  return;
 }
 
 const char *
@@ -421,23 +419,8 @@ struct pair_verify_context *
 pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id)
 {
   struct pair_verify_context *vctx;
-  char hex[] = { 0, 0, 0 };
-  size_t hexkey_len;
-  const char *ptr;
-  int i;
 
-  if (sodium_init() == -1)
-    return NULL;
-
-  if (!hexkey)
-    return NULL;
-
-  hexkey_len = strlen(hexkey);
-
-  if (hexkey_len != 2 * sizeof(vctx->client_private_key))
-    return NULL;
-
-  if (device_id && strlen(device_id) != 16)
+  if (!pair[type]->pair_verify_new)
     return NULL;
 
   vctx = calloc(1, sizeof(struct pair_verify_context));
@@ -446,23 +429,10 @@ pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id)
 
   vctx->type = pair[type];
 
-  if (device_id)
-    memcpy(vctx->device_id, device_id, strlen(device_id));
-
-  ptr = hexkey;
-  for (i = 0; i < sizeof(vctx->client_private_key); i++, ptr+=2)
+  if (pair[type]->pair_verify_new(vctx, hexkey, device_id) < 0)
     {
-      hex[0] = ptr[0];
-      hex[1] = ptr[1];
-      vctx->client_private_key[i] = strtol(hex, NULL, 16);
-    }
-
-  ptr = hexkey + hexkey_len - 2 * sizeof(vctx->client_public_key);
-  for (i = 0; i < sizeof(vctx->client_public_key); i++, ptr+=2)
-    {
-      hex[0] = ptr[0];
-      hex[1] = ptr[1];
-      vctx->client_public_key[i] = strtol(hex, NULL, 16);
+      free(vctx);
+      return NULL;
     }
 
   return vctx;
@@ -473,6 +443,9 @@ pair_verify_free(struct pair_verify_context *vctx)
 {
   if (!vctx)
     return;
+
+  if (vctx->type->pair_verify_free)
+    vctx->type->pair_verify_free(vctx);
 
   free(vctx);
 }
@@ -532,8 +505,11 @@ pair_verify_result(const uint8_t **shared_secret, size_t *shared_secret_len, str
       return -1;
     }
 
-  *shared_secret = vctx->shared_secret;
-  *shared_secret_len = sizeof(vctx->shared_secret);
+  if (!vctx->type->pair_verify_result)
+    return -1;
+
+  if (vctx->type->pair_verify_result(shared_secret, shared_secret_len, vctx) != 0)
+    return -1;
 
   return 0;
 }
