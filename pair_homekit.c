@@ -44,6 +44,7 @@
 #include <sodium.h>
 
 #include "pair-internal.h"
+#include "pair-tlv.h"
 
 
 /* ----------------------------- DEFINES ETC ------------------------------- */
@@ -487,263 +488,23 @@ srp_user_verify_session(struct SRPUser *usr, const unsigned char *bytes_HAMK)
 }
 
 
-/* ---------------------------------- TLV ----------------------------------- */
-
-#define TLV_ERROR_MEMORY -1
-#define TLV_ERROR_INSUFFICIENT_SIZE -2
-
-typedef enum {
-    TLVType_Method = 0,        // (integer) Method to use for pairing. See PairMethod
-    TLVType_Identifier = 1,    // (UTF-8) Identifier for authentication
-    TLVType_Salt = 2,          // (bytes) 16+ bytes of random salt
-    TLVType_PublicKey = 3,     // (bytes) Curve25519, SRP public key or signed Ed25519 key
-    TLVType_Proof = 4,         // (bytes) Ed25519 or SRP proof
-    TLVType_EncryptedData = 5, // (bytes) Encrypted data with auth tag at end
-    TLVType_State = 6,         // (integer) State of the pairing process. 1=M1, 2=M2, etc.
-    TLVType_Error = 7,         // (integer) Error code. Must only be present if error code is
-                               // not 0. See TLVError
-    TLVType_RetryDelay = 8,    // (integer) Seconds to delay until retrying a setup code
-    TLVType_Certificate = 9,   // (bytes) X.509 Certificate
-    TLVType_Signature = 10,    // (bytes) Ed25519
-    TLVType_Permissions = 11,  // (integer) Bit value describing permissions of the controller
-                               // being added.
-                               // None (0x00): Regular user
-                               // Bit 1 (0x01): Admin that is able to add and remove
-                               // pairings against the accessory
-    TLVType_FragmentData = 13, // (bytes) Non-last fragment of data. If length is 0,
-                               // it's an ACK.
-    TLVType_FragmentLast = 14, // (bytes) Last fragment of data
-    TLVType_Flags = 19,        // Added from airplay2_receiver
-    TLVType_Separator = 0xff,
-} TLVType;
-
-
-typedef enum {
-  TLVError_Unknown = 1,         // Generic error to handle unexpected errors
-  TLVError_Authentication = 2,  // Setup code or signature verification failed
-  TLVError_Backoff = 3,         // Client must look at the retry delay TLV item and
-                                // wait that many seconds before retrying
-  TLVError_MaxPeers = 4,        // Server cannot accept any more pairings
-  TLVError_MaxTries = 5,        // Server reached its maximum number of
-                                // authentication attempts
-  TLVError_Unavailable = 6,     // Server pairing method is unavailable
-  TLVError_Busy = 7,            // Server is busy and cannot accept a pairing
-                                // request at this time
-} TLVError;
-
-typedef struct _tlv {
-    struct _tlv *next;
-    uint8_t type;
-    uint8_t *value;
-    size_t size;
-} tlv_t;
-
-
-typedef struct {
-    tlv_t *head;
-} tlv_values_t;
-
-
-static tlv_values_t *
-tlv_new() {
-    tlv_values_t *values = malloc(sizeof(tlv_values_t));
-    if (!values)
-        return NULL;
-
-    values->head = NULL;
-    return values;
-}
-
-static void
-tlv_free(tlv_values_t *values) {
-    tlv_t *t = values->head;
-    while (t) {
-        tlv_t *t2 = t;
-        t = t->next;
-        if (t2->value)
-            free(t2->value);
-        free(t2);
-    }
-    free(values);
-}
-
-static int
-tlv_add_value_(tlv_values_t *values, uint8_t type, uint8_t *value, size_t size) {
-    tlv_t *tlv = malloc(sizeof(tlv_t));
-    if (!tlv) {
-        return TLV_ERROR_MEMORY;
-    }
-    tlv->type = type;
-    tlv->size = size;
-    tlv->value = value;
-    tlv->next = NULL;
-
-    if (!values->head) {
-        values->head = tlv;
-    } else {
-        tlv_t *t = values->head;
-        while (t->next) {
-            t = t->next;
-        }
-        t->next = tlv;
-    }
-
-    return 0;
-}
-
-static int
-tlv_add_value(tlv_values_t *values, uint8_t type, const uint8_t *value, size_t size) {
-    uint8_t *data = NULL;
-    int ret;
-    if (size) {
-        data = malloc(size);
-        if (!data) {
-            return TLV_ERROR_MEMORY;
-        }
-        memcpy(data, value, size);
-    }
-    ret = tlv_add_value_(values, type, data, size);
-    if (ret < 0)
-        free(data);
-    return ret;
-}
-
-static tlv_t *
-tlv_get_value(const tlv_values_t *values, uint8_t type) {
-    tlv_t *t = values->head;
-    while (t) {
-        if (t->type == type)
-            return t;
-        t = t->next;
-    }
-    return NULL;
-}
-
-static int
-tlv_format(const tlv_values_t *values, uint8_t *buffer, size_t *size) {
-    size_t required_size = 0;
-    tlv_t *t = values->head;
-    while (t) {
-        required_size += t->size + 2 * ((t->size + 254) / 255);
-        t = t->next;
-    }
-
-    if (*size < required_size) {
-        *size = required_size;
-        return TLV_ERROR_INSUFFICIENT_SIZE;
-    }
-
-    *size = required_size;
-
-    t = values->head;
-    while (t) {
-        uint8_t *data = t->value;
-        if (!t->size) {
-            buffer[0] = t->type;
-            buffer[1] = 0;
-            buffer += 2;
-            t = t->next;
-            continue;
-        }
-
-        size_t remaining = t->size;
-
-        while (remaining) {
-            buffer[0] = t->type;
-            size_t chunk_size = (remaining > 255) ? 255 : remaining;
-            buffer[1] = chunk_size;
-            memcpy(&buffer[2], data, chunk_size);
-            remaining -= chunk_size;
-            buffer += chunk_size + 2;
-            data += chunk_size;
-        }
-
-        t = t->next;
-    }
-
-    return 0;
-}
-
-static int
-tlv_parse(const uint8_t *buffer, size_t length, tlv_values_t *values) {
-    size_t i = 0;
-    int ret;
-    while (i < length) {
-        uint8_t type = buffer[i];
-        size_t size = 0;
-        uint8_t *data = NULL;
-
-        // scan TLVs to accumulate total size of subsequent TLVs with same type (chunked data)
-        size_t j = i;
-        while (j < length && buffer[j] == type && buffer[j+1] == 255) {
-            size_t chunk_size = buffer[j+1];
-            size += chunk_size;
-            j += chunk_size + 2;
-        }
-        if (j < length && buffer[j] == type) {
-            size_t chunk_size = buffer[j+1];
-            size += chunk_size;
-        }
-
-        // allocate memory to hold all pieces of chunked data and copy data there
-        if (size != 0) {
-            data = malloc(size);
-            if (!data)
-                return TLV_ERROR_MEMORY;
-
-            uint8_t *p = data;
-
-            size_t remaining = size;
-            while (remaining) {
-                size_t chunk_size = buffer[i+1];
-                memcpy(p, &buffer[i+2], chunk_size);
-                p += chunk_size;
-                i += chunk_size + 2;
-                remaining -= chunk_size;
-            }
-        }
-
-        ret = tlv_add_value_(values, type, data, size);
-        if (ret < 0) {
-            free(data);
-            return ret;
-        }
-    }
-
-    return 0;
-}
-
-
 /* -------------------------------- HELPERS --------------------------------- */
 
-#ifdef DEBUG_PAIR
-static void
-tlv_debug(const tlv_values_t *values)
-{
-  printf("Received TLV values\n");
-  for (tlv_t *t=values->head; t; t=t->next)
-    {
-      printf("Type %d value (%zu bytes): \n", t->type, t->size);
-      hexdump("", t->value, t->size);
-    }
-}
-#endif
-
-static tlv_values_t *
+static pair_tlv_values_t *
 response_process(const uint8_t *data, size_t data_len, const char **errmsg)
 {
-  tlv_values_t *response;
-  tlv_t *error;
+  pair_tlv_values_t *response;
+  pair_tlv_t *error;
   int ret;
 
-  response = tlv_new();
+  response = pair_tlv_new();
   if (!response)
     {
       *errmsg = "Out of memory\n";
       return NULL;
     }
 
-  ret = tlv_parse(data, data_len, response);
+  ret = pair_tlv_parse(data, data_len, response);
   if (ret < 0)
     {
       *errmsg = "Could not parse TLV\n";
@@ -751,10 +512,10 @@ response_process(const uint8_t *data, size_t data_len, const char **errmsg)
     }
 
 #ifdef DEBUG_PAIR
-  tlv_debug(response);
+  pair_tlv_debug(response);
 #endif
 
-  error = tlv_get_value(response, TLVType_Error);
+  error = pair_tlv_get_value(response, TLVType_Error);
   if (error)
     {
       if (error->value[0] == TLVError_Authentication)
@@ -776,7 +537,7 @@ response_process(const uint8_t *data, size_t data_len, const char **errmsg)
   return response;
 
  error:
-  tlv_free(response);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -987,7 +748,7 @@ decrypt_chacha(uint8_t *plain, uint8_t *cipher, size_t cipher_len, const uint8_t
 static int
 create_and_sign_device_info(uint8_t *data, size_t *data_len, const char *device_id, uint8_t *device_pk, size_t device_pk_len, uint8_t *pk, size_t pk_len, uint8_t *sk)
 {
-  tlv_values_t *tlv;
+  pair_tlv_values_t *tlv;
   uint8_t *device_info;
   uint32_t device_info_len;
   size_t device_id_len;
@@ -1006,13 +767,13 @@ create_and_sign_device_info(uint8_t *data, size_t *data_len, const char *device_
   crypto_sign_detached(signature, NULL, device_info, device_info_len, sk);
   free(device_info);
 
-  tlv = tlv_new();
-  tlv_add_value(tlv, TLVType_Identifier, (unsigned char *)device_id, device_id_len);
-  tlv_add_value(tlv, TLVType_Signature, signature, sizeof(signature));
+  tlv = pair_tlv_new();
+  pair_tlv_add_value(tlv, TLVType_Identifier, (unsigned char *)device_id, device_id_len);
+  pair_tlv_add_value(tlv, TLVType_Signature, signature, sizeof(signature));
 
-  ret = tlv_format(tlv, data, data_len);
+  ret = pair_tlv_format(tlv, data, data_len);
 
-  tlv_free(tlv);
+  pair_tlv_free(tlv);
   return ret;
 }
 
@@ -1074,7 +835,7 @@ pair_setup_free(struct pair_setup_context *sctx)
 static uint8_t *
 pair_setup_request1(size_t *len, struct pair_setup_context *sctx)
 {
-  tlv_values_t *request;
+  pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
   uint8_t method;
@@ -1084,7 +845,7 @@ pair_setup_request1(size_t *len, struct pair_setup_context *sctx)
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
-  request = tlv_new();
+  request = pair_tlv_new();
 
   // Test here instead of setup_new() so we can give an error message
   if(*(char *)&endian_test != 1)
@@ -1101,29 +862,29 @@ pair_setup_request1(size_t *len, struct pair_setup_context *sctx)
     }
 
   method = PairingMethodPairSetup;
-  tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG01].state, sizeof(pair_keys_map[PAIR_SETUP_MSG01].state));
-  tlv_add_value(request, TLVType_Method, &method, sizeof(method));
+  pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG01].state, sizeof(pair_keys_map[PAIR_SETUP_MSG01].state));
+  pair_tlv_add_value(request, TLVType_Method, &method, sizeof(method));
 
   if (sctx->type == &pair_homekit_transient)
     {
       flags = PairingFlagsTransient;
-      tlv_add_value(request, TLVType_Flags, &flags, sizeof(flags));
+      pair_tlv_add_value(request, TLVType_Flags, &flags, sizeof(flags));
     }
 
-  ret = tlv_format(request, data, &data_len);
+  ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      sctx->errmsg = "Setup request 1: tlv_format returned an error";
+      sctx->errmsg = "Setup request 1: pair_tlv_format returned an error";
       goto error;
     }
 
   *len = data_len;
 
-  tlv_free(request);
+  pair_tlv_free(request);
   return data;
 
  error:
-  tlv_free(request);
+  pair_tlv_free(request);
   free(data);
   return NULL;
 }
@@ -1131,7 +892,7 @@ pair_setup_request1(size_t *len, struct pair_setup_context *sctx)
 static uint8_t *
 pair_setup_request2(size_t *len, struct pair_setup_context *sctx)
 {
-  tlv_values_t *request;
+  pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
   const char *auth_username = NULL;
@@ -1139,7 +900,7 @@ pair_setup_request2(size_t *len, struct pair_setup_context *sctx)
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
-  request = tlv_new();
+  request = pair_tlv_new();
 
   // Calculate A
   srp_user_start_authentication(sctx->user, &auth_username, &sctx->pkA, &sctx->pkA_len);
@@ -1147,24 +908,24 @@ pair_setup_request2(size_t *len, struct pair_setup_context *sctx)
   // Calculate M1 (client proof)
   srp_user_process_challenge(sctx->user, (const unsigned char *)sctx->salt, sctx->salt_len, (const unsigned char *)sctx->pkB, sctx->pkB_len, &sctx->M1, &sctx->M1_len);
 
-  tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG03].state, sizeof(pair_keys_map[PAIR_SETUP_MSG03].state));
-  tlv_add_value(request, TLVType_PublicKey, sctx->pkA, sctx->pkA_len);
-  tlv_add_value(request, TLVType_Proof, sctx->M1, sctx->M1_len);
+  pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG03].state, sizeof(pair_keys_map[PAIR_SETUP_MSG03].state));
+  pair_tlv_add_value(request, TLVType_PublicKey, sctx->pkA, sctx->pkA_len);
+  pair_tlv_add_value(request, TLVType_Proof, sctx->M1, sctx->M1_len);
 
-  ret = tlv_format(request, data, &data_len);
+  ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      sctx->errmsg = "Setup request 2: tlv_format returned an error";
+      sctx->errmsg = "Setup request 2: pair_tlv_format returned an error";
       goto error;
     }
 
   *len = data_len;
 
-  tlv_free(request);
+  pair_tlv_free(request);
   return data;
 
  error:
-  tlv_free(request);
+  pair_tlv_free(request);
   free(data);
   return NULL;
 }
@@ -1172,7 +933,7 @@ pair_setup_request2(size_t *len, struct pair_setup_context *sctx)
 static uint8_t *
 pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
 {
-  tlv_values_t *request;
+  pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
   const unsigned char *session_key;
@@ -1181,7 +942,7 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
   uint8_t derived_key[32];
-  tlv_values_t *append;
+  pair_tlv_values_t *append;
   size_t append_len;
   uint8_t *encrypted_data = NULL;
   size_t encrypted_data_len;
@@ -1189,7 +950,7 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
-  request = tlv_new();
+  request = pair_tlv_new();
 
   session_key = srp_user_get_session_key(sctx->user, &session_key_len);
   if (!session_key)
@@ -1222,11 +983,11 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
     }
 
   // Append TLV-encoded public key to *data, which already has identifier and signature
-  append = tlv_new();
+  append = pair_tlv_new();
   append_len = REQUEST_BUFSIZE - data_len;
-  tlv_add_value(append, TLVType_PublicKey, sctx->public_key, sizeof(sctx->public_key));
-  ret = tlv_format(append, data + data_len, &append_len);
-  tlv_free(append);
+  pair_tlv_add_value(append, TLVType_PublicKey, sctx->public_key, sizeof(sctx->public_key));
+  ret = pair_tlv_format(append, data + data_len, &append_len);
+  pair_tlv_free(append);
   if (ret < 0)
     {
       sctx->errmsg = "Setup request 3: error appending public key to TLV";
@@ -1248,11 +1009,11 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
 
   memcpy(encrypted_data + data_len, tag, sizeof(tag));
 
-  tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG05].state, sizeof(pair_keys_map[PAIR_SETUP_MSG05].state));
-  tlv_add_value(request, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
+  pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG05].state, sizeof(pair_keys_map[PAIR_SETUP_MSG05].state));
+  pair_tlv_add_value(request, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
 
-  data_len = REQUEST_BUFSIZE; // Re-using *data, so pass original length to tlv_format
-  ret = tlv_format(request, data, &data_len);
+  data_len = REQUEST_BUFSIZE; // Re-using *data, so pass original length to pair_tlv_format
+  ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
       sctx->errmsg = "Setup request 3: error appending public key to TLV";
@@ -1262,12 +1023,12 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
   *len = data_len;
 
   free(encrypted_data);
-  tlv_free(request);
+  pair_tlv_free(request);
   return data;
 
  error:
   free(encrypted_data);
-  tlv_free(request);
+  pair_tlv_free(request);
   free(data);
   return NULL;
 }
@@ -1275,9 +1036,9 @@ pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
 static int
 pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
-  tlv_values_t *response;
-  tlv_t *pk;
-  tlv_t *salt;
+  pair_tlv_values_t *response;
+  pair_tlv_t *pk;
+  pair_tlv_t *salt;
 
   response = response_process(data, data_len, &sctx->errmsg);
   if (!response)
@@ -1285,8 +1046,8 @@ pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, size_
       return -1;
     }
 
-  pk = tlv_get_value(response, TLVType_PublicKey);
-  salt = tlv_get_value(response, TLVType_Salt);
+  pk = pair_tlv_get_value(response, TLVType_PublicKey);
+  salt = pair_tlv_get_value(response, TLVType_Salt);
   if (!pk || !salt)
     {
       sctx->errmsg = "Setup response 1: Missing or invalid pk/salt";
@@ -1301,19 +1062,19 @@ pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, size_
   sctx->salt = malloc(sctx->salt_len);
   memcpy(sctx->salt, salt->value, sctx->salt_len);
 
-  tlv_free(response);
+  pair_tlv_free(response);
   return 0;
 
  error:
-  tlv_free(response);
+  pair_tlv_free(response);
   return -1;
 }
 
 static int
 pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
-  tlv_values_t *response;
-  tlv_t *proof;
+  pair_tlv_values_t *response;
+  pair_tlv_t *proof;
 
   response = response_process(data, data_len, &sctx->errmsg);
   if (!response)
@@ -1321,7 +1082,7 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, size_
       return -1;
     }
 
-  proof = tlv_get_value(response, TLVType_Proof);
+  proof = pair_tlv_get_value(response, TLVType_Proof);
   if (!proof)
     {
       sctx->errmsg = "Setup response 2: Missing proof";
@@ -1340,7 +1101,7 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, size_
       goto error;
     }
 
-  tlv_free(response);
+  pair_tlv_free(response);
 
   if (sctx->type == &pair_homekit_transient)
     sctx->setup_is_completed = 1;
@@ -1348,15 +1109,15 @@ pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, size_
   return 0;
 
  error:
-  tlv_free(response);
+  pair_tlv_free(response);
   return -1;
 }
 
 static int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
-  tlv_values_t *response;
-  tlv_t *encrypted_data;
+  pair_tlv_values_t *response;
+  pair_tlv_t *encrypted_data;
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
   uint8_t derived_key[32];
@@ -1372,7 +1133,7 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_
       return -1;
     }
 
-  encrypted_data = tlv_get_value(response, TLVType_EncryptedData);
+  encrypted_data = pair_tlv_get_value(response, TLVType_EncryptedData);
   if (!encrypted_data)
     {
       sctx->errmsg = "Setup response 3: Missing encrypted_data";
@@ -1413,7 +1174,7 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_
       goto error;
     }
 
-  tlv_free(response);
+  pair_tlv_free(response);
   response = response_process(decrypted_data, encrypted_len, &sctx->errmsg);
   if (!response)
     {
@@ -1423,14 +1184,14 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_
   // TODO check identifier and signature - we get an identifier (36), a public key (32) and a signature (64)
 
   free(decrypted_data);
-  tlv_free(response);
+  pair_tlv_free(response);
 
   sctx->setup_is_completed = 1;
   return 0;
 
  error:
   free(decrypted_data);
-  tlv_free(response);
+  pair_tlv_free(response);
   return -1;
 }
 
@@ -1467,14 +1228,14 @@ static uint8_t *
 pair_verify_request1(size_t *len, struct pair_verify_context *vctx)
 {
   const uint8_t basepoint[32] = {9};
-  tlv_values_t *request;
+  pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
   int ret;
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
-  request = tlv_new();
+  request = pair_tlv_new();
 
   ret = crypto_scalarmult(vctx->client_eph_public_key, vctx->client_eph_private_key, basepoint);
   if (ret < 0)
@@ -1483,23 +1244,23 @@ pair_verify_request1(size_t *len, struct pair_verify_context *vctx)
       goto error;
     }
 
-  tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG01].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG01].state));
-  tlv_add_value(request, TLVType_PublicKey, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key));
+  pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG01].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG01].state));
+  pair_tlv_add_value(request, TLVType_PublicKey, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key));
 
-  ret = tlv_format(request, data, &data_len);
+  ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 1: tlv_format returned an error";
+      vctx->errmsg = "Verify request 1: pair_tlv_format returned an error";
       goto error;
     }
 
   *len = data_len;
 
-  tlv_free(request);
+  pair_tlv_free(request);
   return data;
 
  error:
-  tlv_free(request);
+  pair_tlv_free(request);
   free(data);
   return NULL;
 }
@@ -1507,7 +1268,7 @@ pair_verify_request1(size_t *len, struct pair_verify_context *vctx)
 static uint8_t *
 pair_verify_request2(size_t *len, struct pair_verify_context *vctx)
 {
-  tlv_values_t *request;
+  pair_tlv_values_t *request;
   uint8_t *data;
   size_t data_len;
   uint8_t nonce[NONCE_LENGTH] = { 0 };
@@ -1519,7 +1280,7 @@ pair_verify_request2(size_t *len, struct pair_verify_context *vctx)
 
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
-  request = tlv_new();
+  request = pair_tlv_new();
 
   ret = create_and_sign_device_info(data, &data_len, vctx->device_id, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key),
                                     vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key), vctx->client_private_key);
@@ -1550,26 +1311,26 @@ pair_verify_request2(size_t *len, struct pair_verify_context *vctx)
 
   memcpy(encrypted_data + data_len, tag, sizeof(tag));
 
-  tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG03].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG03].state));
-  tlv_add_value(request, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
+  pair_tlv_add_value(request, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG03].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG03].state));
+  pair_tlv_add_value(request, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
 
-  data_len = REQUEST_BUFSIZE; // Re-using *data, so pass original length to tlv_format
-  ret = tlv_format(request, data, &data_len);
+  data_len = REQUEST_BUFSIZE; // Re-using *data, so pass original length to pair_tlv_format
+  ret = pair_tlv_format(request, data, &data_len);
   if (ret < 0)
     {
-      vctx->errmsg = "Verify request 2: tlv_format returned an error";
+      vctx->errmsg = "Verify request 2: pair_tlv_format returned an error";
       goto error;
     }
 
   *len = data_len;
 
   free(encrypted_data);
-  tlv_free(request);
+  pair_tlv_free(request);
   return data;
 
  error:
   free(encrypted_data);
-  tlv_free(request);
+  pair_tlv_free(request);
   free(data);
   return NULL;
 }
@@ -1577,9 +1338,9 @@ pair_verify_request2(size_t *len, struct pair_verify_context *vctx)
 static int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
 {
-  tlv_values_t *response;
-  tlv_t *encrypted_data;
-  tlv_t *public_key;
+  pair_tlv_values_t *response;
+  pair_tlv_t *encrypted_data;
+  pair_tlv_t *public_key;
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
   uint8_t derived_key[32];
@@ -1593,14 +1354,14 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, siz
       return -1;
     }
 
-  encrypted_data = tlv_get_value(response, TLVType_EncryptedData);
+  encrypted_data = pair_tlv_get_value(response, TLVType_EncryptedData);
   if (!encrypted_data)
     {
       vctx->errmsg = "Verify response 1: Missing encrypted_data";
       goto error;
     }
 
-  public_key = tlv_get_value(response, TLVType_PublicKey);
+  public_key = pair_tlv_get_value(response, TLVType_PublicKey);
   if (!public_key || public_key->size != sizeof(vctx->server_eph_public_key))
     {
       vctx->errmsg = "Verify response 1: Missing or invalid public_key";
@@ -1642,7 +1403,7 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, siz
       goto error;
     }
 
-  tlv_free(response);
+  pair_tlv_free(response);
   response = response_process(decrypted_data, encrypted_len, &vctx->errmsg);
   if (!response)
     {
@@ -1652,12 +1413,12 @@ pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, siz
   // TODO check identifier and signature
 
   free(decrypted_data);
-  tlv_free(response);
+  pair_tlv_free(response);
   return 0;
 
  error:
   free(decrypted_data);
-  tlv_free(response);
+  pair_tlv_free(response);
   return -1;
 }
 
