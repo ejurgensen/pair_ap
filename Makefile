@@ -6,3 +6,4 @@ LIBS=-levent -lplist -lgcrypt -lsodium
 
 all:
 	$(CC) $(CFLAGS) client-example.c pair.c pair-tlv.c pair_fruit.c pair_homekit.c evrtsp/rtsp.c -o client-example $(LIBS)
+	$(CC) $(CFLAGS) server-example.c pair.c pair-tlv.c pair_fruit.c pair_homekit.c evrtsp/rtsp.c -o server-example $(LIBS)
