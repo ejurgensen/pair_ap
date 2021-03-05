@@ -9,8 +9,8 @@ Credit goes to @funtax for doing the heavy lifting.
 - libgcrypt or libopenssl
 - libplist (only for Apple TV device verification)
 
-To build the example client you also need libevent2. If the dependencies are met
-you can build simply by running 'make'.
+To build the example client and server you also need libevent2. If the
+dependencies are met you can build simply by running 'make'.
 
 ## Acknowledgments
 - [AirPlayAuth](https://github.com/funtax/AirPlayAuth)
