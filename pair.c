@@ -318,12 +318,10 @@ uint8_t *
 pair_setup_request1(size_t *len, struct pair_setup_context *sctx)
 {
   if (!sctx->type->pair_setup_request1)
-    return NULL;
-
-  return sctx->type->pair_setup_request1(len, sctx);
-
-  if (!sctx->type->pair_setup_request1)
-    return NULL;
+    {
+      sctx->errmsg = "Setup request 1: Unsupported";
+      return NULL;
+    }
 
   return sctx->type->pair_setup_request1(len, sctx);
 }
@@ -332,7 +330,10 @@ uint8_t *
 pair_setup_request2(size_t *len, struct pair_setup_context *sctx)
 {
   if (!sctx->type->pair_setup_request2)
-    return NULL;
+    {
+      sctx->errmsg = "Setup request 2: Unsupported";
+      return NULL;
+    }
 
   return sctx->type->pair_setup_request2(len, sctx);
 }
@@ -341,7 +342,10 @@ uint8_t *
 pair_setup_request3(size_t *len, struct pair_setup_context *sctx)
 {
   if (!sctx->type->pair_setup_request3)
-    return NULL;
+    {
+      sctx->errmsg = "Setup request 3: Unsupported";
+      return NULL;
+    }
 
   return sctx->type->pair_setup_request3(len, sctx);
 }
@@ -350,7 +354,10 @@ int
 pair_setup_response1(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
   if (!sctx->type->pair_setup_response1)
-    return -1;
+    {
+      sctx->errmsg = "Setup response 1: Unsupported";
+      return -1;
+    }
 
   return sctx->type->pair_setup_response1(sctx, data, data_len);
 }
@@ -359,7 +366,10 @@ int
 pair_setup_response2(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
   if (!sctx->type->pair_setup_response2)
-    return -1;
+    {
+      sctx->errmsg = "Setup response 2: Unsupported";
+      return -1;
+    }
 
   return sctx->type->pair_setup_response2(sctx, data, data_len);
 }
@@ -368,7 +378,10 @@ int
 pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len)
 {
   if (!sctx->type->pair_setup_response3)
-    return -1;
+    {
+      sctx->errmsg = "Setup response 3: Unsupported";
+      return -1;
+    }
 
   if (sctx->type->pair_setup_response3(sctx, data, data_len) != 0)
     return -1;
@@ -391,13 +404,21 @@ pair_setup_result(const char **hexkey, const uint8_t **key, size_t *key_len, str
     }
 
   if (!sctx->type->pair_setup_result)
-    return -1;
+    {
+      sctx->errmsg = "Setup result: Unsupported";
+      return -1;
+    }
 
   if (sctx->type->pair_setup_result(&out_key, &out_len, sctx) != 0)
-    return -1;
+    {
+      return -1;
+    }
 
   if (2 * out_len + 1 > sizeof(sctx->auth_key))
-    return -1;
+    {
+      sctx->errmsg = "Setup result: Invalid key length";
+      return -1;
+    }
 
   ptr = sctx->auth_key;
   for (i = 0; i < out_len; i++)
@@ -460,7 +481,10 @@ uint8_t *
 pair_verify_request1(size_t *len, struct pair_verify_context *vctx)
 {
   if (!vctx->type->pair_verify_request1)
-    return NULL;
+    {
+      vctx->errmsg = "Verify request 1: Unsupported";
+      return NULL;
+    }
 
   return vctx->type->pair_verify_request1(len, vctx);
 }
@@ -469,7 +493,10 @@ uint8_t *
 pair_verify_request2(size_t *len, struct pair_verify_context *vctx)
 {
   if (!vctx->type->pair_verify_request2)
-    return NULL;
+    {
+      vctx->errmsg = "Verify request 2: Unsupported";
+      return NULL;
+    }
 
   return vctx->type->pair_verify_request2(len, vctx);
 }
@@ -478,7 +505,10 @@ int
 pair_verify_response1(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
 {
   if (!vctx->type->pair_verify_response1)
-    return -1;
+    {
+      vctx->errmsg = "Verify response 1: Unsupported";
+      return -1;
+    }
 
   return vctx->type->pair_verify_response1(vctx, data, data_len);
 }
@@ -487,7 +517,10 @@ int
 pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len)
 {
   if (!vctx->type->pair_verify_response2)
-    return -1;
+    {
+      vctx->errmsg = "Verify response 2: Unsupported";
+      return -1;
+    }
 
   if (vctx->type->pair_verify_response2(vctx, data, data_len) != 0)
     return -1;
@@ -545,7 +578,10 @@ ssize_t
 pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx)
 {
   if (!cctx->type->pair_encrypt)
-    return 0;
+    {
+      cctx->errmsg = "Encryption unsupported";
+      return -1;
+    }
 
   return cctx->type->pair_encrypt(ciphertext, ciphertext_len, plaintext, plaintext_len, cctx);
 }
@@ -554,7 +590,10 @@ ssize_t
 pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx)
 {
   if (!cctx->type->pair_decrypt)
-    return 0;
+    {
+      cctx->errmsg = "Decryption unsupported";
+      return -1;
+    }
 
   return cctx->type->pair_decrypt(plaintext, plaintext_len, ciphertext, ciphertext_len, cctx);
 }
