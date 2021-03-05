@@ -762,7 +762,7 @@ srp_verifier_verify_session(struct SRPVerifier *ver, const unsigned char *user_M
     *bytes_HAMK = NULL;
 }
 
-const unsigned char *
+static const unsigned char *
 srp_verifier_get_session_key(struct SRPVerifier *ver, int *key_length)
 {
   if (key_length)
