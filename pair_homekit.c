@@ -1819,6 +1819,7 @@ pair_server_setup_request1(struct pair_setup_context *handle, const uint8_t *dat
   struct pair_server_setup_context *sctx = &handle->sctx.server;
   pair_tlv_values_t *request;
   pair_tlv_t *method;
+  pair_tlv_t *type;
   int ret;
 
   request = message_process(data, data_len, &handle->errmsg);
@@ -1831,6 +1832,13 @@ pair_server_setup_request1(struct pair_setup_context *handle, const uint8_t *dat
   if (!method || method->size != 1 || method->value[0] != 0)
     {
       handle->errmsg = "Setup request 1: Missing or unexpected pairing method in TLV";
+      goto error;
+    }
+
+  type = pair_tlv_get_value(request, TLVType_Flags);
+  if (!type || type->size != 1 || type->value[0] != PairingFlagsTransient)
+    {
+      handle->errmsg = "Setup request 1: No support for the non-transient pairing requested by client";
       goto error;
     }
 
