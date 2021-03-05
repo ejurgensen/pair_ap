@@ -57,6 +57,7 @@ struct rtsp_msg
 {
   int content_length;
   char *content_type;
+  char *first_line;
   int cseq;
 
   const uint8_t *body;
@@ -65,6 +66,7 @@ struct rtsp_msg
   const uint8_t *data;
   size_t datalen;
 };
+
 
 static void
 connection_free(struct connection_ctx *conn_ctx)
@@ -101,6 +103,7 @@ response_create_from_raw(struct evbuffer *response, uint8_t *body, size_t body_l
 static void
 rtsp_clear(struct rtsp_msg *msg)
 {
+  free(msg->first_line);
   free(msg->content_type);
 }
 
@@ -133,6 +136,9 @@ rtsp_parse(struct rtsp_msg *msg, uint8_t *in, size_t in_len)
 	}
 
       in[i - 1] = '\0';
+
+      if (!msg->first_line)
+	msg->first_line = strdup(line);
 
       if (strncmp(line, "CSeq: ", strlen("CSeq: ")) == 0)
 	msg->cseq = atoi(line + strlen("CSeq: "));
@@ -330,11 +336,14 @@ handle_options(struct evbuffer *output, struct connection_ctx *conn_ctx, struct 
 static int
 response_send(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
-  if (msg->datalen > strlen(POST_PAIR_SETUP) && memcmp(msg->data, POST_PAIR_SETUP, strlen(POST_PAIR_SETUP)) == 0)
+  if (!msg->first_line)
+    return -1;
+  if (strncmp(msg->first_line, POST_PAIR_SETUP, strlen(POST_PAIR_SETUP)) == 0)
     return handle_pairing(output, conn_ctx, msg);
-  if (msg->datalen > strlen(OPTIONS) && memcmp(msg->data, OPTIONS, strlen(OPTIONS)) == 0)
+  if (strncmp(msg->first_line, OPTIONS, strlen(OPTIONS)) == 0)
     return handle_options(output, conn_ctx, msg);
 
+  printf("Unknown method: %s\n", msg->first_line);
   return -1;
 }
 
@@ -380,7 +389,6 @@ in_read_cb(struct bufferevent *bev, void *arg)
   ret = response_send(output, conn_ctx, &msg);
   if (ret < 0)
     {
-      printf("Could not create response to message\n");
       goto error;
     }
 
