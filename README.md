@@ -1,9 +1,10 @@
 # pair_ap
 C client implementation of pairing for:
-* Apple TV device verification, which became mandatory with tvOS 10.2
+* Apple TV device verification, which became mandatory with tvOS 10.2 (this is
+  called fruit mode in pair_ap)
 * Homekit pairing (for AirPlay 2)
 
-Credit goes to @funtax for doing the heavy lifting.
+Credit goes to @funtax and @ViktoriiaKh for doing some of the heavy lifting.
 ## Requirements
 - libsodium
 - libgcrypt or libopenssl

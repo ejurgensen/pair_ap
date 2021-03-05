@@ -15,7 +15,8 @@ enum pair_type
   // verification
   PAIR_CLIENT_HOMEKIT_NORMAL,
   // Same as normal except PIN is fixed to 3939 and stops after setup step 2,
-  // when session key is established
+  // when session key is established. This is the only mode where the server
+  // side is also supported.
   PAIR_CLIENT_HOMEKIT_TRANSIENT,
   PAIR_SERVER_HOMEKIT_TRANSIENT,
 };
@@ -24,9 +25,15 @@ struct pair_setup_context;
 struct pair_verify_context;
 struct pair_cipher_context;
 
-/* When you have the pin-code (must be 4 bytes), create a new context with this
+/* Client
+ * When you have the pin-code (must be 4 bytes), create a new context with this
  * function and then call pair_setup_request1(). device_id is only
  * required for homekit pairing, where it should have length 16.
+ *
+ * Server
+ * Create a new context with the pin-code to verify with, then when the request
+ * is received use pair_setup_response1() to read it, and then reply with using
+ * pair_setup_request1().
  */
 struct pair_setup_context *
 pair_setup_new(enum pair_type type, const char *pin, const char *device_id);
