@@ -36,7 +36,6 @@
 #include <event2/listener.h>
 
 #include "pair.h"
-#include "pair-tlv.h"
 
 #define CONTENTTYPE_SETUP_HOMEKIT "application/octet-stream"
 #define RTSP_VERSION "RTSP/1.0"
