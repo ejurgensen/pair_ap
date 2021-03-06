@@ -156,6 +156,8 @@ struct pair_definition
 
   ssize_t (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
   ssize_t (*pair_decrypt)(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
+
+  int (*pair_state_get)(const char **errmsg, const uint8_t *data, size_t data_len);
 };
 
 

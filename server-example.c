@@ -37,6 +37,7 @@
 
 #include "pair.h"
 
+#define LISTEN_PORT 7000
 #define CONTENTTYPE_SETUP_HOMEKIT "application/octet-stream"
 #define RTSP_VERSION "RTSP/1.0"
 #define POST_PAIR_SETUP "POST /pair-setup"
@@ -48,7 +49,6 @@ struct connection_ctx
   struct pair_setup_context *setup_ctx;
   struct pair_cipher_context *cipher_ctx;
 
-  int pair_step;
   int pair_completed;
 };
 
@@ -285,10 +285,12 @@ handle_pair_setup2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_c
 }
 
 static int
-handle_pairing(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+handle_pair_setup(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
   uint8_t *out;
   size_t out_len;
+  const char *errmsg;
+  int state;
   int ret;
 
   if (!msg->body || !msg->content_type || strcmp(msg->content_type, CONTENTTYPE_SETUP_HOMEKIT) != 0)
@@ -297,13 +299,19 @@ handle_pairing(struct evbuffer *output, struct connection_ctx *conn_ctx, struct 
       return -1;
     }
 
-  conn_ctx->pair_step++;
-  switch (conn_ctx->pair_step)
+  state = pair_state_get(PAIR_SERVER_HOMEKIT_TRANSIENT, &errmsg, msg->body, msg->bodylen);
+  if (state < 0)
+    {
+      printf("Error reading pair message: %s\n", errmsg);
+      return -1;
+    }
+
+  switch (state)
     {
       case 1:
 	ret = handle_pair_setup1(&out, &out_len, conn_ctx, msg);
 	break;
-      case 2:
+      case 3:
 	ret = handle_pair_setup2(&out, &out_len, conn_ctx, msg);
 	break;
       default:
@@ -338,7 +346,7 @@ response_send(struct evbuffer *output, struct connection_ctx *conn_ctx, struct r
   if (!msg->first_line)
     return -1;
   if (strncmp(msg->first_line, POST_PAIR_SETUP, strlen(POST_PAIR_SETUP)) == 0)
-    return handle_pairing(output, conn_ctx, msg);
+    return handle_pair_setup(output, conn_ctx, msg);
   if (strncmp(msg->first_line, OPTIONS, strlen(OPTIONS)) == 0)
     return handle_options(output, conn_ctx, msg);
 
@@ -479,9 +487,11 @@ main(int argc, char * argv[])
 
   evbase = event_base_new();
 
-  listener = listen_add(evbase, in_accept_cb, in_error_cb, 7000);
+  listener = listen_add(evbase, in_accept_cb, in_error_cb, LISTEN_PORT);
   if (!listener)
     return -1;
+
+  printf("Listening for pairing requests on port %d\n", LISTEN_PORT);
 
   event_base_dispatch(evbase);
 

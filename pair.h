@@ -136,4 +136,10 @@ pair_encrypt_rollback(struct pair_cipher_context *cctx);
 void
 pair_decrypt_rollback(struct pair_cipher_context *cctx);
 
+/* For parsing an incoming message to see what type ("state") it is. Mostly
+ * useful for servers. Returns 1-6 for pair-setup and 1-4 for pair-verify.
+ */
+int
+pair_state_get(enum pair_type type, const char **errmsg, const uint8_t *data, size_t data_len);
+
 #endif  /* !__PAIR_AP_H__ */

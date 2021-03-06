@@ -609,3 +609,15 @@ pair_decrypt_rollback(struct pair_cipher_context *cctx)
 {
   cctx->decryption_counter = cctx->decryption_counter_prev;
 }
+
+int
+pair_state_get(enum pair_type type, const char **errmsg, const uint8_t *data, size_t data_len)
+{
+  if (!pair[type]->pair_state_get)
+    {
+      *errmsg = "Getting pair state unsupported";
+      return -1;
+    }
+
+  return pair[type]->pair_state_get(errmsg, data, data_len);
+}

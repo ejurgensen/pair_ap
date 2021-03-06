@@ -2184,6 +2184,36 @@ pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, si
   return cipher_block - ciphertext;
 }
 
+static int
+pair_state_get(const char **errmsg, const uint8_t *data, size_t data_len)
+{
+  pair_tlv_values_t *message;
+  pair_tlv_t *state;
+  int ret;
+
+  message = message_process(data, data_len, errmsg);
+  if (!message)
+    {
+      goto error;
+    }
+
+  state = pair_tlv_get_value(message, TLVType_State);
+  if (!state || state->size != 1)
+    {
+      *errmsg = "Could not get message state";
+      goto error;
+    }
+
+  ret = state->value[0];
+
+  pair_tlv_free(message);
+  return ret;
+
+ error:
+  pair_tlv_free(message);
+  return -1;
+}
+
 const struct pair_definition pair_client_homekit_normal =
 {
   .pair_setup_new = pair_client_setup_new,
@@ -2212,6 +2242,8 @@ const struct pair_definition pair_client_homekit_normal =
 
   .pair_encrypt = pair_encrypt,
   .pair_decrypt = pair_decrypt,
+
+  .pair_state_get = pair_state_get,
 };
 
 const struct pair_definition pair_client_homekit_transient =
@@ -2242,6 +2274,8 @@ const struct pair_definition pair_client_homekit_transient =
 
   .pair_encrypt = pair_encrypt,
   .pair_decrypt = pair_decrypt,
+
+  .pair_state_get = pair_state_get,
 };
 
 const struct pair_definition pair_server_homekit_transient =
@@ -2261,4 +2295,6 @@ const struct pair_definition pair_server_homekit_transient =
 
   .pair_encrypt = pair_encrypt,
   .pair_decrypt = pair_decrypt,
+
+  .pair_state_get = pair_state_get,
 };
