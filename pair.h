@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define PAIR_AP_VERSION_MAJOR 0
-#define PAIR_AP_VERSION_MINOR 1
+#define PAIR_AP_VERSION_MINOR 2
 
 enum pair_type
 {
