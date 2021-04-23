@@ -1,4 +1,10 @@
 *.o
+*.lo
+*.a
+*.la
 .dirstamp
+.deps/
+.libs/
+
 client-example
 server-example
