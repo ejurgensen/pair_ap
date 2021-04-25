@@ -188,8 +188,7 @@ static void
 verify_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  const uint8_t *shared_secret;
-  size_t shared_secret_len;
+  struct pair_result *result;
   int ret;
 
   ret = response_process(&response, req);
@@ -200,13 +199,13 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  printf("Verify complete\n");
+  printf("Verify complete!\n\n");
 
-  ret = pair_verify_result(&shared_secret, &shared_secret_len, verify_ctx);
+  ret = pair_verify_result(&result, verify_ctx);
   if (ret < 0)
     goto error;
 
-  cipher_ctx = pair_cipher_new(pair_type, 0, shared_secret, shared_secret_len);
+  cipher_ctx = pair_cipher_new(pair_type, 0, result->shared_secret, result->shared_secret_len);
   if (!cipher_ctx)
     goto error;
 
@@ -278,7 +277,7 @@ verify_step1_request(const char *authorisation_key)
   size_t len;
   int ret;
 
-  verify_ctx = pair_verify_new(pair_type, authorisation_key, DEVICE_ID);
+  verify_ctx = pair_verify_new(pair_type, authorisation_key, NULL, NULL, DEVICE_ID);
   if (!verify_ctx)
     return -1;
 
@@ -303,8 +302,9 @@ verify_step1_request(const char *authorisation_key)
 static void
 setup_step3_response(struct evrtsp_request *req, void *arg)
 {
-  const char *authorisation_key;
+  const char *key;
   uint8_t *response;
+  struct pair_result *result;
   int ret;
 
   ret = response_process(&response, req);
@@ -315,13 +315,13 @@ setup_step3_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  ret = pair_setup_result(&authorisation_key, NULL, NULL, setup_ctx);
+  ret = pair_setup_result(&key, &result, setup_ctx);
   if (ret < 0)
     goto error;
 
-  printf("Setup complete, got authorisation key: %s\n", authorisation_key);
+  printf("Setup of device ID %s complete, got key: %s\n", result->device_id, key);
 
-  ret = verify_step1_request(authorisation_key);
+  ret = verify_step1_request(key);
   if (ret < 0)
     goto error;
 
@@ -357,8 +357,7 @@ static void
 setup_step2_response(struct evrtsp_request *req, void *arg)
 {
   uint8_t *response;
-  const uint8_t *transient_key;
-  size_t transient_key_len;
+  struct pair_result *result;
   int ret;
 
   ret = response_process(&response, req);
@@ -373,11 +372,11 @@ setup_step2_response(struct evrtsp_request *req, void *arg)
 
   if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT)
     {
-      ret = pair_setup_result(NULL, &transient_key, &transient_key_len, setup_ctx);
+      ret = pair_setup_result(NULL, &result, setup_ctx);
       if (ret < 0)
 	goto error;
 
-      cipher_ctx = pair_cipher_new(pair_type, 0, transient_key, transient_key_len);
+      cipher_ctx = pair_cipher_new(pair_type, 0, result->shared_secret, result->shared_secret_len);
       if (!cipher_ctx)
 	goto error;
 

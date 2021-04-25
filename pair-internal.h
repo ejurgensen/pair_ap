@@ -1,5 +1,8 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include <sodium.h>
+
+#include "pair.h"
 
 struct SRPUser;
 struct SRPVerifier;
@@ -8,8 +11,11 @@ struct pair_client_setup_context
 {
   struct SRPUser *user;
 
-  char pin[4];
-  char device_id[17]; // Incl. zero term
+  uint8_t pin[4];
+  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
+
+  uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
+  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
 
   const uint8_t *pkA;
   int pkA_len;
@@ -25,8 +31,6 @@ struct pair_client_setup_context
 
   uint8_t *salt;
   uint64_t salt_len;
-  uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
-  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
 
   // We don't actually use the server's epk and authtag for anything
   uint8_t *epk;
@@ -39,8 +43,13 @@ struct pair_server_setup_context
 {
   struct SRPVerifier *verifier;
 
-  char pin[4];
-  char device_id[17]; // Incl. zero term
+  uint8_t pin[4];
+  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
+
+  uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
+  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
+
+  bool is_transient;
 
   uint8_t *pkA;
   uint64_t pkA_len;
@@ -71,6 +80,9 @@ struct pair_setup_context
   int setup_is_completed;
   const char *errmsg;
 
+  struct pair_result result;
+  char result_str[256]; // Holds the hex string version of the keys that pair_verify_new() needs
+
   // Hex-formatet concatenation of public + private, 0-terminated
   char auth_key[2 * (crypto_sign_PUBLICKEYBYTES + crypto_sign_SECRETKEYBYTES) + 1];
 
@@ -83,18 +95,44 @@ struct pair_setup_context
 
 struct pair_client_verify_context
 {
-  char device_id[17]; // Incl. zero term
+  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
 
-  uint8_t server_eph_public_key[32];
-  uint8_t server_public_key[64];
+  // These are the keys that were registered with the server in pair-setup
+  uint8_t client_public_key[crypto_sign_PUBLICKEYBYTES]; // 32
+  uint8_t client_private_key[crypto_sign_SECRETKEYBYTES]; // 64
 
-  uint8_t client_public_key[crypto_sign_PUBLICKEYBYTES];
-  uint8_t client_private_key[crypto_sign_SECRETKEYBYTES];
+  bool verify_server_signature;
+  uint8_t server_fruit_public_key[64]; // Not sure why it has this length in fruit mode
+  uint8_t server_public_key[crypto_sign_PUBLICKEYBYTES]; // 32
 
-  uint8_t client_eph_public_key[32];
-  uint8_t client_eph_private_key[32];
+  // For establishing the shared secret for encrypted communication
+  uint8_t client_eph_public_key[crypto_box_PUBLICKEYBYTES]; // 32
+  uint8_t client_eph_private_key[crypto_box_SECRETKEYBYTES]; // 32
 
-  uint8_t shared_secret[32];
+  uint8_t server_eph_public_key[crypto_box_PUBLICKEYBYTES]; // 32
+
+  uint8_t shared_secret[crypto_scalarmult_BYTES]; // 32
+};
+
+struct pair_server_verify_context
+{
+  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
+
+  // Same keys as used for pair-setup, derived from device_id
+  uint8_t server_public_key[crypto_sign_PUBLICKEYBYTES]; // 32
+  uint8_t server_private_key[crypto_sign_SECRETKEYBYTES]; // 64
+
+  bool verify_client_signature;
+  pair_get_cb get_cb;
+  void *get_cb_arg;
+
+  // For establishing the shared secret for encrypted communication
+  uint8_t server_eph_public_key[crypto_box_PUBLICKEYBYTES]; // 32
+  uint8_t server_eph_private_key[crypto_box_SECRETKEYBYTES]; // 32
+
+  uint8_t client_eph_public_key[crypto_box_PUBLICKEYBYTES]; // 32
+
+  uint8_t shared_secret[crypto_scalarmult_BYTES]; // 32
 };
 
 struct pair_verify_context
@@ -104,9 +142,12 @@ struct pair_verify_context
   int verify_is_completed;
   const char *errmsg;
 
+  struct pair_result result;
+
   union pair_verify_union
   {
     struct pair_client_verify_context client;
+    struct pair_server_verify_context server;
   } vctx;
 };
 
@@ -131,7 +172,7 @@ struct pair_definition
 {
   int (*pair_setup_new)(struct pair_setup_context *sctx, const char *pin, const char *device_id);
   void (*pair_setup_free)(struct pair_setup_context *sctx);
-  int (*pair_setup_result)(const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx);
+  int (*pair_setup_result)(struct pair_setup_context *sctx);
 
   uint8_t *(*pair_setup_request1)(size_t *len, struct pair_setup_context *sctx);
   uint8_t *(*pair_setup_request2)(size_t *len, struct pair_setup_context *sctx);
@@ -141,9 +182,9 @@ struct pair_definition
   int (*pair_setup_response2)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
   int (*pair_setup_response3)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
 
-  int (*pair_verify_new)(struct pair_verify_context *vctx, const char *hexkey, const char *device_id);
+  int (*pair_verify_new)(struct pair_verify_context *vctx, const char *client_setup_keys, pair_get_cb cb, void *cb_arg, const char *device_id);
   void (*pair_verify_free)(struct pair_verify_context *vctx);
-  int (*pair_verify_result)(const uint8_t **key, size_t *key_len, struct pair_verify_context *vctx);
+  int (*pair_verify_result)(struct pair_verify_context *vctx);
 
   uint8_t *(*pair_verify_request1)(size_t *len, struct pair_verify_context *vctx);
   uint8_t *(*pair_verify_request2)(size_t *len, struct pair_verify_context *vctx);

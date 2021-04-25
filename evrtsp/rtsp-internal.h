@@ -17,8 +17,8 @@
 #include <event2/event_struct.h>
 
 #define RTSP_CONNECT_TIMEOUT	5
-#define RTSP_WRITE_TIMEOUT	10
-#define RTSP_READ_TIMEOUT	10
+#define RTSP_WRITE_TIMEOUT	30
+#define RTSP_READ_TIMEOUT	30
 
 #define RTSP_PREFIX		"rtsp://"
 

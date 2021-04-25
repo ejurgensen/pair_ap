@@ -34,14 +34,14 @@
 extern struct pair_definition pair_client_fruit;
 extern struct pair_definition pair_client_homekit_normal;
 extern struct pair_definition pair_client_homekit_transient;
-extern struct pair_definition pair_server_homekit_transient;
+extern struct pair_definition pair_server_homekit;
 
 // Must be in sync with enum pair_type
 static struct pair_definition *pair[] = {
     &pair_client_fruit,
     &pair_client_homekit_normal,
     &pair_client_homekit_transient,
-    &pair_server_homekit_transient,
+    &pair_server_homekit,
 };
 
 /* -------------------------- SHARED HASHING HELPERS ------------------------ */
@@ -390,54 +390,29 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *data, size_
 }
 
 int
-pair_setup_result(const char **hexkey, const uint8_t **key, size_t *key_len, struct pair_setup_context *sctx)
+pair_setup_result(const char **client_setup_keys, struct pair_result **result, struct pair_setup_context *sctx)
 {
-  const uint8_t *out_key;
-  size_t out_len;
-  char *ptr;
-  int i;
-
   if (!sctx->setup_is_completed)
     {
-      sctx->errmsg = "Setup result: The pair setup has not been completed";
+      sctx->errmsg = "Setup result: Pair setup has not been completed";
       return -1;
     }
 
-  if (!sctx->type->pair_setup_result)
+  if (sctx->type->pair_setup_result)
     {
-      sctx->errmsg = "Setup result: Unsupported";
-      return -1;
+      if (sctx->type->pair_setup_result(sctx) != 0)
+	return -1;
     }
 
-  if (sctx->type->pair_setup_result(&out_key, &out_len, sctx) != 0)
-    {
-      return -1;
-    }
-
-  if (2 * out_len + 1 > sizeof(sctx->auth_key))
-    {
-      sctx->errmsg = "Setup result: Invalid key length";
-      return -1;
-    }
-
-  ptr = sctx->auth_key;
-  for (i = 0; i < out_len; i++)
-    ptr += sprintf(ptr, "%02x", out_key[i]);
-  *ptr = '\0';
-
-  if (key)
-    *key = out_key;
-  if (key_len)
-    *key_len = out_len;
-  if (hexkey)
-    *hexkey = sctx->auth_key;
-
+  if (client_setup_keys)
+    *client_setup_keys = sctx->result_str;
+  if (result)
+    *result = &sctx->result;
   return 0;
 }
 
-
 struct pair_verify_context *
-pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id)
+pair_verify_new(enum pair_type type, const char *client_setup_keys, pair_get_cb cb, void *cb_arg, const char *device_id)
 {
   struct pair_verify_context *vctx;
 
@@ -450,7 +425,7 @@ pair_verify_new(enum pair_type type, const char *hexkey, const char *device_id)
 
   vctx->type = pair[type];
 
-  if (pair[type]->pair_verify_new(vctx, hexkey, device_id) < 0)
+  if (pair[type]->pair_verify_new(vctx, client_setup_keys, cb, cb_arg, device_id) < 0)
     {
       free(vctx);
       return NULL;
@@ -525,12 +500,11 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *data, siz
   if (vctx->type->pair_verify_response2(vctx, data, data_len) != 0)
     return -1;
 
-  vctx->verify_is_completed = 1;
   return 0;
 }
 
 int
-pair_verify_result(const uint8_t **shared_secret, size_t *shared_secret_len, struct pair_verify_context *vctx)
+pair_verify_result(struct pair_result **result, struct pair_verify_context *vctx)
 {
   if (!vctx->verify_is_completed)
     {
@@ -538,12 +512,14 @@ pair_verify_result(const uint8_t **shared_secret, size_t *shared_secret_len, str
       return -1;
     }
 
-  if (!vctx->type->pair_verify_result)
-    return -1;
+  if (vctx->type->pair_verify_result)
+    {
+      if (vctx->type->pair_verify_result(vctx) != 0)
+	return -1;
+    }
 
-  if (vctx->type->pair_verify_result(shared_secret, shared_secret_len, vctx) != 0)
-    return -1;
-
+  if (result)
+    *result = &vctx->result;
   return 0;
 }
 

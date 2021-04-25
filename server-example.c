@@ -37,16 +37,19 @@
 
 #include "pair.h"
 
+#define DEVICE_ID "FFEEDDCCBBAA9988"
 #define LISTEN_PORT 7000
 #define CONTENTTYPE_SETUP_HOMEKIT "application/octet-stream"
 #define RTSP_VERSION "RTSP/1.0"
 #define POST_PAIR_SETUP "POST /pair-setup"
+#define POST_PAIR_VERIFY "POST /pair-verify"
 #define OPTIONS "OPTIONS *"
 
 struct connection_ctx
 {
   struct evbuffer *pending;
   struct pair_setup_context *setup_ctx;
+  struct pair_verify_context *verify_ctx;
   struct pair_cipher_context *cipher_ctx;
 
   int pair_completed;
@@ -65,6 +68,16 @@ struct rtsp_msg
   const uint8_t *data;
   size_t datalen;
 };
+
+struct pairing
+{
+  const char *device_id;
+  uint8_t public_key[32];
+
+  struct pairing *next;
+};
+
+struct pairing *pairings;
 
 
 static void
@@ -160,6 +173,19 @@ rtsp_parse(struct rtsp_msg *msg, uint8_t *in, size_t in_len)
 }
 
 static int
+encryption_enable(struct connection_ctx *conn_ctx, const uint8_t *shared_secret, size_t shared_secret_len)
+{
+  conn_ctx->cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT, 2, shared_secret, shared_secret_len);
+  if (!conn_ctx->cipher_ctx)
+    {
+      printf("Error setting up ciphering\n");
+      return -1;
+    }
+
+  return 0;
+}
+
+static int
 encrypt(struct evbuffer *output, uint8_t *in, size_t in_len, struct connection_ctx *conn_ctx)
 {
   uint8_t *out;
@@ -183,33 +209,12 @@ decrypt(struct evbuffer *output, struct evbuffer *input, struct connection_ctx *
 {
   uint8_t *in;
   size_t in_len;
-  const char *hexkey;
-  const uint8_t *key;
-  size_t key_len;
   ssize_t bytes_decrypted;
   uint8_t *plain;
   size_t plain_len;
-  int ret;
 
   in = evbuffer_pullup(input, -1);
   in_len = evbuffer_get_length(input);
-
-  if (!conn_ctx->cipher_ctx)
-    {
-      ret = pair_setup_result(&hexkey, &key, &key_len, conn_ctx->setup_ctx);
-      if (ret < 0)
-	{
-	  printf("Error getting setup key: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-	  return -1;
-	}
-
-      conn_ctx->cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT_TRANSIENT, 2, key, key_len);
-      if (!conn_ctx->cipher_ctx)
-	{
-	  printf("Error setting up ciphering\n");
-	  return -1;
-	}
-    }
 
   // Note that bytes_decrypted is not necessarily equal to plain_len
   bytes_decrypted = pair_decrypt(&plain, &plain_len, in, in_len, conn_ctx->cipher_ctx);
@@ -225,12 +230,64 @@ decrypt(struct evbuffer *output, struct evbuffer *input, struct connection_ctx *
   return 0;
 }
 
+static struct pairing *
+pairing_find(const char *device_id)
+{
+  struct pairing *pairing;
+
+  for (pairing = pairings; pairing; pairing = pairing->next)
+    {
+      if (strcmp(device_id, pairing->device_id) == 0)
+        break;
+    }
+
+  return pairing;
+}
+
+static int
+pairing_add(const char *device_id, uint8_t public_key[32])
+{
+  struct pairing *pairing;
+
+  pairing = pairing_find(device_id);
+  if (pairing)
+    {
+      memcpy(pairing->public_key, public_key, sizeof(pairing->public_key));
+      return 0;
+    }
+
+  pairing = malloc(sizeof(struct pairing));
+  pairing->device_id = strdup(device_id);
+  memcpy(pairing->public_key, public_key, sizeof(pairing->public_key));
+
+  pairing->next = pairings;
+  pairings = pairing;
+
+  return 0;
+}
+
+static int
+pairing_get_cb(uint8_t public_key[32], const char *device_id, void *cb_arg)
+{
+  struct pairing *pairing;
+
+  printf("Returning public key for paired device %s\n", device_id);
+
+  pairing = pairing_find(device_id);
+  if (!pairing)
+    return -1;
+
+  memcpy(public_key, pairing->public_key, sizeof(pairing->public_key));
+
+  return 0;
+}
+
 static int
 handle_pair_setup1(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
   int ret;
 
-  conn_ctx->setup_ctx = pair_setup_new(PAIR_SERVER_HOMEKIT_TRANSIENT, NULL, NULL);
+  conn_ctx->setup_ctx = pair_setup_new(PAIR_SERVER_HOMEKIT, NULL, DEVICE_ID);
   if (!conn_ctx->setup_ctx)
     {
       printf("Error creating pair context\n");
@@ -257,6 +314,7 @@ handle_pair_setup1(uint8_t **out, size_t *out_len, struct connection_ctx *conn_c
 static int
 handle_pair_setup2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
+  struct pair_result *result;
   int ret;
 
   if (!conn_ctx->setup_ctx)
@@ -279,7 +337,49 @@ handle_pair_setup2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_c
       return -1;
     }
 
-  conn_ctx->pair_completed = 1;
+  // Check if pair completed now -> transient mode
+  ret = pair_setup_result(NULL, &result, conn_ctx->setup_ctx);
+  if (ret == 0)
+    {
+      encryption_enable(conn_ctx, result->shared_secret, result->shared_secret_len);
+      conn_ctx->pair_completed = 1;
+    }
+
+  return 0;
+}
+
+static int
+handle_pair_setup3(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  struct pair_result *result;
+  int ret;
+
+  if (!conn_ctx->setup_ctx)
+    {
+      printf("Error, missing pair context\n");
+      return -1;
+    }
+
+  ret = pair_setup_response3(conn_ctx->setup_ctx, msg->body, msg->bodylen);
+  if (ret < 0)
+    {
+      printf("Error reading pair setup 3: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
+      return -1;
+    }
+
+  *out = pair_setup_request3(out_len, conn_ctx->setup_ctx);
+  if (!*out)
+    {
+      printf("Error constructing pair setup 3: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
+      return -1;
+    }
+
+  // Register paired device
+  ret = pair_setup_result(NULL, &result, conn_ctx->setup_ctx);
+  if (ret == 0)
+    {
+      pairing_add(result->device_id, result->client_public_key);
+    }
 
   return 0;
 }
@@ -299,7 +399,7 @@ handle_pair_setup(struct evbuffer *output, struct connection_ctx *conn_ctx, stru
       return -1;
     }
 
-  state = pair_state_get(PAIR_SERVER_HOMEKIT_TRANSIENT, &errmsg, msg->body, msg->bodylen);
+  state = pair_state_get(PAIR_SERVER_HOMEKIT, &errmsg, msg->body, msg->bodylen);
   if (state < 0)
     {
       printf("Error reading pair message: %s\n", errmsg);
@@ -313,6 +413,116 @@ handle_pair_setup(struct evbuffer *output, struct connection_ctx *conn_ctx, stru
 	break;
       case 3:
 	ret = handle_pair_setup2(&out, &out_len, conn_ctx, msg);
+	break;
+      case 5:
+	ret = handle_pair_setup3(&out, &out_len, conn_ctx, msg);
+	break;
+      default:
+	ret = -1;
+    }
+  if (ret < 0)
+    return -1;
+
+  response_create_from_raw(output, out, out_len, msg->cseq);
+  free(out);
+
+  return ret;
+}
+
+static int
+handle_pair_verify1(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  int ret;
+
+  conn_ctx->verify_ctx = pair_verify_new(PAIR_SERVER_HOMEKIT, NULL, pairing_get_cb, NULL, DEVICE_ID);
+  if (!conn_ctx->verify_ctx)
+    {
+      printf("Error creating verify context\n");
+      return -1;
+    }
+
+  ret = pair_verify_response1(conn_ctx->verify_ctx, msg->body, msg->bodylen);
+  if (ret < 0)
+    {
+      printf("Error reading pair verify 1: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
+      return -1;
+    }
+
+  *out = pair_verify_request1(out_len, conn_ctx->verify_ctx);
+  if (!*out)
+    {
+      printf("Error constructing pair verify 1: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
+      return -1;
+    }
+
+  return 0;
+}
+
+static int
+handle_pair_verify2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  struct pair_result *result;
+  int ret;
+
+  if (!conn_ctx->verify_ctx)
+    {
+      printf("Error, missing verify context\n");
+      return -1;
+    }
+
+  ret = pair_verify_response2(conn_ctx->verify_ctx, msg->body, msg->bodylen);
+  if (ret < 0)
+    {
+      printf("Error reading pair verify 2: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
+      return -1;
+    }
+
+  *out = pair_verify_request2(out_len, conn_ctx->verify_ctx);
+  if (!*out)
+    {
+      printf("Error constructing pair verify 2: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
+      return -1;
+    }
+
+  ret = pair_verify_result(&result, conn_ctx->verify_ctx);
+  if (ret == 0)
+    {
+      encryption_enable(conn_ctx, result->shared_secret, result->shared_secret_len);
+      conn_ctx->pair_completed = 1;
+    }
+
+  return 0;
+}
+
+static int
+handle_pair_verify(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  uint8_t *out;
+  size_t out_len;
+  const char *errmsg;
+  int state;
+  int ret;
+
+  if (!msg->body || !msg->content_type || strcmp(msg->content_type, CONTENTTYPE_SETUP_HOMEKIT) != 0)
+    {
+      printf("Invalid pairing request\n");
+      return -1;
+    }
+
+  state = pair_state_get(PAIR_SERVER_HOMEKIT, &errmsg, msg->body, msg->bodylen);
+  if (state < 0)
+    {
+      printf("Error reading pair message: %s\n", errmsg);
+      return -1;
+    }
+
+  switch (state)
+    {
+      case 1:
+	ret = handle_pair_verify1(&out, &out_len, conn_ctx, msg);
+	break;
+      case 3:
+	ret = handle_pair_verify2(&out, &out_len, conn_ctx, msg);
 	break;
       default:
 	ret = -1;
@@ -347,6 +557,8 @@ response_send(struct evbuffer *output, struct connection_ctx *conn_ctx, struct r
     return -1;
   if (strncmp(msg->first_line, POST_PAIR_SETUP, strlen(POST_PAIR_SETUP)) == 0)
     return handle_pair_setup(output, conn_ctx, msg);
+  if (strncmp(msg->first_line, POST_PAIR_VERIFY, strlen(POST_PAIR_VERIFY)) == 0)
+    return handle_pair_verify(output, conn_ctx, msg);
   if (strncmp(msg->first_line, OPTIONS, strlen(OPTIONS)) == 0)
     return handle_options(output, conn_ctx, msg);
 
