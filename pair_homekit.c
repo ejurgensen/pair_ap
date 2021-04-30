@@ -1900,11 +1900,22 @@ client_verify_response2(struct pair_verify_context *handle, const uint8_t *data,
 
 /* ------------------------- SERVER IMPLEMENTATION -------------------------- */
 
+// Use (unsecure) keys seeded from device_id. We need the keys to always be the
+// same during pair setup and pair verify, since the client saves them after
+// pair-setup 3, so that the signature in pair-verify 1 can be checked.
+static void
+server_keypair(uint8_t *public_key, uint8_t *private_key, const char *device_id)
+{
+  uint8_t seed[crypto_sign_SEEDBYTES] = { 0 };
+
+  snprintf((char *)seed, sizeof(seed), "%s", device_id);
+  crypto_sign_seed_keypair(public_key, private_key, seed);
+}
+
 static int
 server_setup_new(struct pair_setup_context *handle, const char *pin, const char *device_id)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
-  uint8_t seed[crypto_sign_SEEDBYTES] = { 0 };
 
   if (sodium_init() == -1)
     return -1;
@@ -1918,11 +1929,7 @@ server_setup_new(struct pair_setup_context *handle, const char *pin, const char 
   memcpy(sctx->pin, pin, sizeof(sctx->pin));
   snprintf(sctx->device_id, sizeof(sctx->device_id), "%s", device_id);
 
-  // Use (unsecure) keys seeded from device_id, we need the keys to always be
-  // the same, since the client saves them after pair-setup 3, so that the
-  // signature in pair-verify 1 can be checked. TODO test this assumption
-  snprintf((char *)seed, sizeof(seed), "%s", device_id);
-  crypto_sign_seed_keypair(sctx->public_key, sctx->private_key, seed);
+  server_keypair(sctx->public_key, sctx->private_key, sctx->device_id);
 
   return 0;
 }
@@ -2352,7 +2359,6 @@ static int
 server_verify_new(struct pair_verify_context *handle, const char *client_setup_keys, pair_get_cb cb, void *cb_arg, const char *device_id)
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
-  uint8_t seed[crypto_sign_SEEDBYTES] = { 0 };
 
   if (sodium_init() == -1)
     return -1;
@@ -2369,11 +2375,7 @@ server_verify_new(struct pair_verify_context *handle, const char *client_setup_k
   vctx->get_cb_arg = cb_arg;
   vctx->verify_client_signature = cb;
 
-  // Use (unsecure) keys seeded from device_id, we need the keys to always be
-  // the same, since the client saves them after pair-setup 3, so that the
-  // signature in pair-verify 1 can be checked. TODO test this assumption
-  snprintf((char *)seed, sizeof(seed), "%s", device_id);
-  crypto_sign_seed_keypair(vctx->server_public_key, vctx->server_private_key, seed);
+  server_keypair(vctx->server_public_key, vctx->server_private_key, vctx->device_id);
 
   return 0;
 }
