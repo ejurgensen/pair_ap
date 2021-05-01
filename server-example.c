@@ -39,10 +39,8 @@
 
 #define DEVICE_ID "FFEEDDCCBBAA9988"
 #define LISTEN_PORT 7000
-#define CONTENTTYPE_SETUP_HOMEKIT "application/octet-stream"
+#define CONTENT_TYPE_OCTET "application/octet-stream"
 #define RTSP_VERSION "RTSP/1.0"
-#define POST_PAIR_SETUP "POST /pair-setup"
-#define POST_PAIR_VERIFY "POST /pair-verify"
 #define OPTIONS "OPTIONS *"
 
 struct connection_ctx
@@ -69,15 +67,13 @@ struct rtsp_msg
   size_t datalen;
 };
 
-struct pairing
+struct pairings
 {
-  const char *device_id;
+  char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
   uint8_t public_key[32];
 
-  struct pairing *next;
-};
-
-struct pairing *pairings;
+  struct pairings *next;
+} *pairings;
 
 
 static void
@@ -94,82 +90,25 @@ connection_free(struct connection_ctx *conn_ctx)
 }
 
 static void
-response_headers_add(struct evbuffer *response, int cseq, const char *content_type, size_t content_length)
+response_headers_add(struct evbuffer *response, int cseq, size_t content_length, const char *content_type)
 {
   evbuffer_add_printf(response, "%s 200 OK\r\n", RTSP_VERSION);
-  evbuffer_add_printf(response, "Server: AirTunes/366.0\r\n");
-  evbuffer_add_printf(response, "Content-Length:%zu\r\n", content_length);
-  evbuffer_add_printf(response, "Content-Type:%s\r\n", content_type);
+  evbuffer_add_printf(response, "Server: MyServer/1.0\r\n");
+  if (content_length)
+    evbuffer_add_printf(response, "Content-Length: %zu\r\n", content_length);
+  if (content_type)
+    evbuffer_add_printf(response, "Content-Type: %s\r\n", content_type);
   evbuffer_add_printf(response, "CSeq: %d\r\n", cseq);
   evbuffer_add_printf(response, "\r\n");
 }
 
 static void
-response_create_from_raw(struct evbuffer *response, uint8_t *body, size_t body_len, int cseq)
+response_create_from_raw(struct evbuffer *response, uint8_t *body, size_t body_len, int cseq, const char *content_type)
 {
-  response_headers_add(response, cseq, "application/octet-stream", body_len);
+  response_headers_add(response, cseq, body_len, content_type);
 
-  evbuffer_add(response, body, body_len);
-}
-
-static void
-rtsp_clear(struct rtsp_msg *msg)
-{
-  free(msg->first_line);
-  free(msg->content_type);
-}
-
-// Very primitive RTSP message parser, hope you have a better one
-static int
-rtsp_parse(struct rtsp_msg *msg, uint8_t *in, size_t in_len)
-{
-  char *line;
-  int i;
-
-  line = (char *)in;
-  for (i = 0; i < in_len; i++)
-    {
-      if (in[i] != '\n' && in[i - 1] != '\r')
-	continue;
-
-      if (in[i - 2] == '\n' && in[i - 3] == '\r')
-	{
-	  msg->bodylen = in_len - (i + 1);
-	  if (msg->bodylen != msg->content_length)
-	    {
-	      printf("Incomplete read (have %zu, content-length %d), waiting for more data\n\n", msg->bodylen, msg->content_length);
-	      rtsp_clear(msg);
-	      return 1;
-	    }
-	  else if (msg->bodylen > 0)
-	    msg->body = in + i + 1;
-
-	  break;
-	}
-
-      in[i - 1] = '\0';
-
-      if (!msg->first_line)
-	msg->first_line = strdup(line);
-
-      if (strncmp(line, "CSeq: ", strlen("CSeq: ")) == 0)
-	msg->cseq = atoi(line + strlen("CSeq: "));
-
-      if (strncmp(line, "Content-Length: ", strlen("Content-Length: ")) == 0)
-	msg->content_length = atoi(line + strlen("Content-Length: "));
-
-      if (strncmp(line, "Content-Type: ", strlen("Content-Type: ")) == 0 && !msg->content_type)
-	msg->content_type = strdup(line + strlen("Content-Type: "));
-
-      in[i - 1] = '\r';
-
-      line = (char *)in + i + 1;
-    }
-
-  msg->data = in;
-  msg->datalen = in_len;
-
-  return 0;
+  if (body)
+    evbuffer_add(response, body, body_len);
 }
 
 static int
@@ -230,10 +169,16 @@ decrypt(struct evbuffer *output, struct evbuffer *input, struct connection_ctx *
   return 0;
 }
 
-static struct pairing *
+
+/* ---------------------------- Pairing callbacks --------------------------- */
+/*   Note that none of these callbacks are required if you don't care about   */
+/*  securely verifying the client + don't require support for the pair-add,   */
+/*                   pair-remove and pair-list methods.                       */
+
+static struct pairings *
 pairing_find(const char *device_id)
 {
-  struct pairing *pairing;
+  struct pairings *pairing;
 
   for (pairing = pairings; pairing; pairing = pairing->next)
     {
@@ -245,9 +190,11 @@ pairing_find(const char *device_id)
 }
 
 static int
-pairing_add(const char *device_id, uint8_t public_key[32])
+pairing_add_cb(uint8_t public_key[32], const char *device_id, void *cb_arg)
 {
-  struct pairing *pairing;
+  struct pairings *pairing;
+
+  printf("Adding paired device %s\n", device_id);
 
   pairing = pairing_find(device_id);
   if (pairing)
@@ -256,8 +203,8 @@ pairing_add(const char *device_id, uint8_t public_key[32])
       return 0;
     }
 
-  pairing = malloc(sizeof(struct pairing));
-  pairing->device_id = strdup(device_id);
+  pairing = calloc(1, sizeof(struct pairings));
+  snprintf(pairing->device_id, sizeof(pairing->device_id), "%s", device_id);
   memcpy(pairing->public_key, public_key, sizeof(pairing->public_key));
 
   pairing->next = pairings;
@@ -267,9 +214,52 @@ pairing_add(const char *device_id, uint8_t public_key[32])
 }
 
 static int
+pairing_remove_cb(uint8_t public_key[32], const char *device_id, void *cb_arg)
+{
+  struct pairings *pairing;
+  struct pairings *iter;
+
+  printf("Removing paired device %s\n", device_id);
+
+  pairing = pairing_find(device_id);
+  if (!pairing)
+    {
+      printf("Remove callback for unknown device\n");
+      return -1;
+    }
+
+  if (pairing == pairings)
+    pairings = pairing->next;
+  else
+    {
+      for (iter = pairings; iter && (iter->next != pairing); iter = iter->next)
+	; /* EMPTY */
+
+      if (iter)
+	iter->next = pairing->next;
+    }
+
+  free(pairing);
+  return 0;
+}
+
+static void
+pairing_list_cb(pair_cb enum_cb, void *enum_cb_arg, void *cb_arg)
+{
+  struct pairings *pairing;
+
+  printf("Listing paired devices\n");
+
+  for (pairing = pairings; pairing; pairing = pairing->next)
+    {
+      enum_cb(pairing->public_key, pairing->device_id, enum_cb_arg);
+    }
+}
+
+static int
 pairing_get_cb(uint8_t public_key[32], const char *device_id, void *cb_arg)
 {
-  struct pairing *pairing;
+  struct pairings *pairing;
 
   printf("Returning public key for paired device %s\n", device_id);
 
@@ -282,104 +272,15 @@ pairing_get_cb(uint8_t public_key[32], const char *device_id, void *cb_arg)
   return 0;
 }
 
-static int
-handle_pair_setup1(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
-{
-  int ret;
 
-  conn_ctx->setup_ctx = pair_setup_new(PAIR_SERVER_HOMEKIT, NULL, DEVICE_ID);
-  if (!conn_ctx->setup_ctx)
-    {
-      printf("Error creating pair context\n");
-      return -1;
-    }
-
-  ret = pair_setup_response1(conn_ctx->setup_ctx, msg->body, msg->bodylen);
-  if (ret < 0)
-    {
-      printf("Error reading pair setup 1: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  *out = pair_setup_request1(out_len, conn_ctx->setup_ctx);
-  if (!*out)
-    {
-      printf("Error constructing pair setup 1: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  return 0;
-}
+/* -------------------------- Pair request handlers ------------------------- */
 
 static int
-handle_pair_setup2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+handle_pin_start(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
-  struct pair_result *result;
-  int ret;
+  printf("Please pair with code 3939\n");
 
-  if (!conn_ctx->setup_ctx)
-    {
-      printf("Error, missing pair context\n");
-      return -1;
-    }
-
-  ret = pair_setup_response2(conn_ctx->setup_ctx, msg->body, msg->bodylen);
-  if (ret < 0)
-    {
-      printf("Error reading pair setup 2: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  *out = pair_setup_request2(out_len, conn_ctx->setup_ctx);
-  if (!*out)
-    {
-      printf("Error constructing pair setup 2: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  // Check if pair completed now -> transient mode
-  ret = pair_setup_result(NULL, &result, conn_ctx->setup_ctx);
-  if (ret == 0)
-    {
-      encryption_enable(conn_ctx, result->shared_secret, result->shared_secret_len);
-      conn_ctx->pair_completed = 1;
-    }
-
-  return 0;
-}
-
-static int
-handle_pair_setup3(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
-{
-  struct pair_result *result;
-  int ret;
-
-  if (!conn_ctx->setup_ctx)
-    {
-      printf("Error, missing pair context\n");
-      return -1;
-    }
-
-  ret = pair_setup_response3(conn_ctx->setup_ctx, msg->body, msg->bodylen);
-  if (ret < 0)
-    {
-      printf("Error reading pair setup 3: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  *out = pair_setup_request3(out_len, conn_ctx->setup_ctx);
-  if (!*out)
-    {
-      printf("Error constructing pair setup 3: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
-      return -1;
-    }
-
-  // Register paired device
-  ret = pair_setup_result(NULL, &result, conn_ctx->setup_ctx);
-  if (ret == 0)
-    {
-      pairing_add(result->device_id, result->client_public_key);
-    }
+  response_create_from_raw(output, NULL, 0, msg->cseq, NULL);
 
   return 0;
 }
@@ -389,98 +290,61 @@ handle_pair_setup(struct evbuffer *output, struct connection_ctx *conn_ctx, stru
 {
   uint8_t *out;
   size_t out_len;
-  const char *errmsg;
-  int state;
+  struct pair_result *result;
   int ret;
 
-  if (!msg->body || !msg->content_type || strcmp(msg->content_type, CONTENTTYPE_SETUP_HOMEKIT) != 0)
+  if (!conn_ctx->setup_ctx)
     {
-      printf("Invalid pairing request\n");
-      return -1;
+      conn_ctx->setup_ctx = pair_setup_new(PAIR_SERVER_HOMEKIT, NULL, pairing_add_cb, NULL, DEVICE_ID);
+      if (!conn_ctx->setup_ctx)
+        {
+          printf("Error creating setup context\n");
+          return -1;
+        }
     }
 
-  state = pair_state_get(PAIR_SERVER_HOMEKIT, &errmsg, msg->body, msg->bodylen);
-  if (state < 0)
-    {
-      printf("Error reading pair message: %s\n", errmsg);
-      return -1;
-    }
-
-  switch (state)
-    {
-      case 1:
-	ret = handle_pair_setup1(&out, &out_len, conn_ctx, msg);
-	break;
-      case 3:
-	ret = handle_pair_setup2(&out, &out_len, conn_ctx, msg);
-	break;
-      case 5:
-	ret = handle_pair_setup3(&out, &out_len, conn_ctx, msg);
-	break;
-      default:
-	ret = -1;
-    }
+  ret = pair_setup(&out, &out_len, conn_ctx->setup_ctx, msg->body, msg->bodylen);
   if (ret < 0)
-    return -1;
+    {
+      printf("Pair setup error: %s\n", pair_setup_errmsg(conn_ctx->setup_ctx));
+      return -1;
+    }
 
-  response_create_from_raw(output, out, out_len, msg->cseq);
+  ret = pair_setup_result(NULL, &result, conn_ctx->setup_ctx);
+  if (ret == 0 && result->shared_secret_len > 0) // Transient pairing completed (step 2)
+    {
+      encryption_enable(conn_ctx, result->shared_secret, result->shared_secret_len);
+      conn_ctx->pair_completed = 1;
+    }
+
+  response_create_from_raw(output, out, out_len, msg->cseq, CONTENT_TYPE_OCTET);
   free(out);
-
-  return ret;
-}
-
-static int
-handle_pair_verify1(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
-{
-  int ret;
-
-  conn_ctx->verify_ctx = pair_verify_new(PAIR_SERVER_HOMEKIT, NULL, pairing_get_cb, NULL, DEVICE_ID);
-  if (!conn_ctx->verify_ctx)
-    {
-      printf("Error creating verify context\n");
-      return -1;
-    }
-
-  ret = pair_verify_response1(conn_ctx->verify_ctx, msg->body, msg->bodylen);
-  if (ret < 0)
-    {
-      printf("Error reading pair verify 1: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
-      return -1;
-    }
-
-  *out = pair_verify_request1(out_len, conn_ctx->verify_ctx);
-  if (!*out)
-    {
-      printf("Error constructing pair verify 1: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
-      return -1;
-    }
 
   return 0;
 }
 
 static int
-handle_pair_verify2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+handle_pair_verify(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
+  uint8_t *out;
+  size_t out_len;
   struct pair_result *result;
   int ret;
 
   if (!conn_ctx->verify_ctx)
     {
-      printf("Error, missing verify context\n");
-      return -1;
+      conn_ctx->verify_ctx = pair_verify_new(PAIR_SERVER_HOMEKIT, NULL, pairing_get_cb, NULL, DEVICE_ID);
+      if (!conn_ctx->verify_ctx)
+        {
+          printf("Error creating verify context\n");
+          return -1;
+        }
     }
 
-  ret = pair_verify_response2(conn_ctx->verify_ctx, msg->body, msg->bodylen);
+  ret = pair_verify(&out, &out_len, conn_ctx->verify_ctx, msg->body, msg->bodylen);
   if (ret < 0)
     {
-      printf("Error reading pair verify 2: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
-      return -1;
-    }
-
-  *out = pair_verify_request2(out_len, conn_ctx->verify_ctx);
-  if (!*out)
-    {
-      printf("Error constructing pair verify 2: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
+      printf("Pair verify error: %s\n", pair_verify_errmsg(conn_ctx->verify_ctx));
       return -1;
     }
 
@@ -491,63 +355,98 @@ handle_pair_verify2(uint8_t **out, size_t *out_len, struct connection_ctx *conn_
       conn_ctx->pair_completed = 1;
     }
 
+  response_create_from_raw(output, out, out_len, msg->cseq, CONTENT_TYPE_OCTET);
+  free(out);
+
   return 0;
 }
 
 static int
-handle_pair_verify(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+handle_pair_add(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
   uint8_t *out;
   size_t out_len;
-  const char *errmsg;
-  int state;
   int ret;
 
-  if (!msg->body || !msg->content_type || strcmp(msg->content_type, CONTENTTYPE_SETUP_HOMEKIT) != 0)
-    {
-      printf("Invalid pairing request\n");
-      return -1;
-    }
-
-  state = pair_state_get(PAIR_SERVER_HOMEKIT, &errmsg, msg->body, msg->bodylen);
-  if (state < 0)
-    {
-      printf("Error reading pair message: %s\n", errmsg);
-      return -1;
-    }
-
-  switch (state)
-    {
-      case 1:
-	ret = handle_pair_verify1(&out, &out_len, conn_ctx, msg);
-	break;
-      case 3:
-	ret = handle_pair_verify2(&out, &out_len, conn_ctx, msg);
-	break;
-      default:
-	ret = -1;
-    }
+  ret = pair_add(PAIR_SERVER_HOMEKIT, &out, &out_len, pairing_add_cb, NULL, msg->body, msg->bodylen);
   if (ret < 0)
-    return -1;
+    {
+      printf("Error adding device to list\n");
+      return -1;
+    }
 
-  response_create_from_raw(output, out, out_len, msg->cseq);
+  response_create_from_raw(output, out, out_len, msg->cseq, CONTENT_TYPE_OCTET);
   free(out);
 
-  return ret;
+  return 0;
+}
+
+static int
+handle_pair_remove(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  uint8_t *out;
+  size_t out_len;
+  int ret;
+
+  ret = pair_remove(PAIR_SERVER_HOMEKIT, &out, &out_len, pairing_remove_cb, NULL, msg->body, msg->bodylen);
+  if (ret < 0)
+    {
+      printf("Error removing device from list\n");
+      return -1;
+    }
+
+  response_create_from_raw(output, out, out_len, msg->cseq, CONTENT_TYPE_OCTET);
+  free(out);
+
+  return 0;
+}
+
+static int
+handle_pair_list(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
+{
+  uint8_t *out;
+  size_t out_len;
+  int ret;
+
+  ret = pair_list(PAIR_SERVER_HOMEKIT, &out, &out_len, pairing_list_cb, NULL, msg->body, msg->bodylen);
+  if (ret < 0)
+    {
+      printf("Error creating list of paired devices\n");
+      return -1;
+    }
+
+  response_create_from_raw(output, out, out_len, msg->cseq, CONTENT_TYPE_OCTET);
+  free(out);
+
+  return 0;
 }
 
 static int
 handle_options(struct evbuffer *output, struct connection_ctx *conn_ctx, struct rtsp_msg *msg)
 {
-  const char *rtsp_response_ok = "RTSP/1.0 200 OK\r\nServer: MyServer/1.0\r\n\r\n";
+  struct evbuffer *response;
+  uint8_t *plain;
+  size_t plain_len;
+  int ret;
+
+  response = evbuffer_new();
+
+  response_create_from_raw(response, NULL, 0, msg->cseq, NULL);
 
   if (!conn_ctx->cipher_ctx)
     {
-      evbuffer_add(output, (unsigned char *)rtsp_response_ok, strlen(rtsp_response_ok));
+      evbuffer_add_buffer(output, response);
+      evbuffer_free(response);
       return 0;
     }
 
-  return encrypt(output, (unsigned char *)rtsp_response_ok, strlen(rtsp_response_ok), conn_ctx);
+  plain = evbuffer_pullup(response, -1);
+  plain_len = evbuffer_get_length(response);
+
+  ret = encrypt(output, plain, plain_len, conn_ctx);
+
+  evbuffer_free(response);
+  return ret;
 }
 
 static int
@@ -555,15 +454,87 @@ response_send(struct evbuffer *output, struct connection_ctx *conn_ctx, struct r
 {
   if (!msg->first_line)
     return -1;
-  if (strncmp(msg->first_line, POST_PAIR_SETUP, strlen(POST_PAIR_SETUP)) == 0)
+
+  if (strncmp(msg->first_line, PAIR_AP_POST_PIN_START, strlen(PAIR_AP_POST_PIN_START)) == 0)
+    return handle_pin_start(output, conn_ctx, msg);
+  else if (strncmp(msg->first_line, PAIR_AP_POST_SETUP, strlen(PAIR_AP_POST_SETUP)) == 0)
     return handle_pair_setup(output, conn_ctx, msg);
-  if (strncmp(msg->first_line, POST_PAIR_VERIFY, strlen(POST_PAIR_VERIFY)) == 0)
+  else if (strncmp(msg->first_line, PAIR_AP_POST_VERIFY, strlen(PAIR_AP_POST_VERIFY)) == 0)
     return handle_pair_verify(output, conn_ctx, msg);
-  if (strncmp(msg->first_line, OPTIONS, strlen(OPTIONS)) == 0)
+  else if (strncmp(msg->first_line, PAIR_AP_POST_ADD, strlen(PAIR_AP_POST_ADD)) == 0)
+    return handle_pair_add(output, conn_ctx, msg);
+  else if (strncmp(msg->first_line, PAIR_AP_POST_LIST, strlen(PAIR_AP_POST_LIST)) == 0)
+    return handle_pair_list(output, conn_ctx, msg);
+  else if (strncmp(msg->first_line, PAIR_AP_POST_REMOVE, strlen(PAIR_AP_POST_REMOVE)) == 0)
+    return handle_pair_remove(output, conn_ctx, msg);
+  else if (strncmp(msg->first_line, OPTIONS, strlen(OPTIONS)) == 0)
     return handle_options(output, conn_ctx, msg);
 
   printf("Unknown method: %s\n", msg->first_line);
   return -1;
+}
+
+
+/* --------------------- A basic RTSP server implementation ----------------- */
+
+static void
+rtsp_clear(struct rtsp_msg *msg)
+{
+  free(msg->first_line);
+  free(msg->content_type);
+}
+
+// Very primitive RTSP message parser, hope you have a better one
+static int
+rtsp_parse(struct rtsp_msg *msg, uint8_t *in, size_t in_len)
+{
+  char *line;
+  int i;
+
+  line = (char *)in;
+  for (i = 0; i < in_len; i++)
+    {
+      if (in[i] != '\n' && in[i - 1] != '\r')
+	continue;
+
+      if (in[i - 2] == '\n' && in[i - 3] == '\r')
+	{
+	  msg->bodylen = in_len - (i + 1);
+	  if (msg->bodylen != msg->content_length)
+	    {
+	      printf("Incomplete read (have %zu, content-length %d), waiting for more data\n\n", msg->bodylen, msg->content_length);
+	      rtsp_clear(msg);
+	      return 1;
+	    }
+	  else if (msg->bodylen > 0)
+	    msg->body = in + i + 1;
+
+	  break;
+	}
+
+      in[i - 1] = '\0';
+
+      if (!msg->first_line)
+	msg->first_line = strdup(line);
+
+      if (strncmp(line, "CSeq: ", strlen("CSeq: ")) == 0)
+	msg->cseq = atoi(line + strlen("CSeq: "));
+
+      if (strncmp(line, "Content-Length: ", strlen("Content-Length: ")) == 0)
+	msg->content_length = atoi(line + strlen("Content-Length: "));
+
+      if (strncmp(line, "Content-Type: ", strlen("Content-Type: ")) == 0 && !msg->content_type)
+	msg->content_type = strdup(line + strlen("Content-Type: "));
+
+      in[i - 1] = '\r';
+
+      line = (char *)in + i + 1;
+    }
+
+  msg->data = in;
+  msg->datalen = in_len;
+
+  return 0;
 }
 
 static void

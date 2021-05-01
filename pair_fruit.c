@@ -597,7 +597,7 @@ encrypt_ctr(unsigned char *ciphertext, int ciphertext_len,
 /* -------------------------- IMPLEMENTATION -------------------------------- */
 
 static int
-client_setup_new(struct pair_setup_context *handle, const char *pin, const char *device_id)
+client_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add_cb, void *cb_arg, const char *device_id)
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
@@ -868,7 +868,7 @@ client_setup_result(struct pair_setup_context *handle)
 
 
 static int
-client_verify_new(struct pair_verify_context *handle, const char *client_setup_keys, pair_get_cb cb, void *cb_arg, const char *device_id)
+client_verify_new(struct pair_verify_context *handle, const char *client_setup_keys, pair_cb cb, void *cb_arg, const char *device_id)
 {
   struct pair_client_verify_context *vctx = &handle->vctx.client;
   char hex[] = { 0, 0, 0 };

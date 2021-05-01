@@ -485,7 +485,7 @@ setup_start_response(struct evrtsp_request *req, void *arg)
 	goto error;
     }
 
-  setup_ctx = pair_setup_new(pair_type, pin, DEVICE_ID);
+  setup_ctx = pair_setup_new(pair_type, pin, NULL, NULL, DEVICE_ID);
   if (!setup_ctx)
     goto error;
 

@@ -14,6 +14,9 @@ struct pair_client_setup_context
   uint8_t pin[4];
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
 
+  pair_cb add_cb;
+  void *add_cb_arg;
+
   uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
   uint8_t private_key[crypto_sign_SECRETKEYBYTES];
 
@@ -45,6 +48,9 @@ struct pair_server_setup_context
 
   uint8_t pin[4];
   char device_id[PAIR_AP_DEVICE_ID_LEN_MAX];
+
+  pair_cb add_cb;
+  void *add_cb_arg;
 
   uint8_t public_key[crypto_sign_PUBLICKEYBYTES];
   uint8_t private_key[crypto_sign_SECRETKEYBYTES];
@@ -123,7 +129,7 @@ struct pair_server_verify_context
   uint8_t server_private_key[crypto_sign_SECRETKEYBYTES]; // 64
 
   bool verify_client_signature;
-  pair_get_cb get_cb;
+  pair_cb get_cb;
   void *get_cb_arg;
 
   // For establishing the shared secret for encrypted communication
@@ -170,7 +176,7 @@ struct pair_cipher_context
 
 struct pair_definition
 {
-  int (*pair_setup_new)(struct pair_setup_context *sctx, const char *pin, const char *device_id);
+  int (*pair_setup_new)(struct pair_setup_context *sctx, const char *pin, pair_cb add_cb, void *cb_arg, const char *device_id);
   void (*pair_setup_free)(struct pair_setup_context *sctx);
   int (*pair_setup_result)(struct pair_setup_context *sctx);
 
@@ -178,19 +184,23 @@ struct pair_definition
   uint8_t *(*pair_setup_request2)(size_t *len, struct pair_setup_context *sctx);
   uint8_t *(*pair_setup_request3)(size_t *len, struct pair_setup_context *sctx);
 
-  int (*pair_setup_response1)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
-  int (*pair_setup_response2)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
-  int (*pair_setup_response3)(struct pair_setup_context *sctx, const uint8_t *data, size_t data_len);
+  int (*pair_setup_response1)(struct pair_setup_context *sctx, const uint8_t *in, size_t in_len);
+  int (*pair_setup_response2)(struct pair_setup_context *sctx, const uint8_t *in, size_t in_len);
+  int (*pair_setup_response3)(struct pair_setup_context *sctx, const uint8_t *in, size_t in_len);
 
-  int (*pair_verify_new)(struct pair_verify_context *vctx, const char *client_setup_keys, pair_get_cb cb, void *cb_arg, const char *device_id);
+  int (*pair_verify_new)(struct pair_verify_context *vctx, const char *client_setup_keys, pair_cb cb, void *cb_arg, const char *device_id);
   void (*pair_verify_free)(struct pair_verify_context *vctx);
   int (*pair_verify_result)(struct pair_verify_context *vctx);
 
   uint8_t *(*pair_verify_request1)(size_t *len, struct pair_verify_context *vctx);
   uint8_t *(*pair_verify_request2)(size_t *len, struct pair_verify_context *vctx);
 
-  int (*pair_verify_response1)(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len);
-  int (*pair_verify_response2)(struct pair_verify_context *vctx, const uint8_t *data, size_t data_len);
+  int (*pair_verify_response1)(struct pair_verify_context *vctx, const uint8_t *in, size_t in_len);
+  int (*pair_verify_response2)(struct pair_verify_context *vctx, const uint8_t *in, size_t in_len);
+
+  int (*pair_add)(uint8_t **out, size_t *out_len, pair_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
+  int (*pair_remove)(uint8_t **out, size_t *out_len, pair_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
+  int (*pair_list)(uint8_t **out, size_t *out_len, pair_list_cb cb, void *cb_arg, const uint8_t *in, size_t in_len);
 
   struct pair_cipher_context *(*pair_cipher_new)(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len);
   void (*pair_cipher_free)(struct pair_cipher_context *cctx);
@@ -198,7 +208,7 @@ struct pair_definition
   ssize_t (*pair_encrypt)(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
   ssize_t (*pair_decrypt)(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
 
-  int (*pair_state_get)(const char **errmsg, const uint8_t *data, size_t data_len);
+  int (*pair_state_get)(const char **errmsg, const uint8_t *in, size_t in_len);
 };
 
 
