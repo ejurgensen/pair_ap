@@ -13,6 +13,59 @@ Credit goes to @funtax and @ViktoriiaKh for doing some of the heavy lifting.
 To build the example client and server you also need libevent2. If the
 dependencies are met you can build simply by running 'make'.
 
+## Homekit pairing
+Since I haven't been able to find much information on the internet on how
+Homekit pairing is designed, here is a write-up of my current understanding. If
+you know better, please help improve this.
+
+With Homekit pairing, there may be a controller, which could for instance be the
+Home app, and then a number of devices/accessories, which could for instance be
+speakers. In the context of pair_ap, the controller is the client (since it is
+making the requests) and the device is the server. The controller can pair with
+devices, and after it is paired it can also add other "third-party" pairings to
+the device, it can remove pairings and it can ask for a list of pairings.
+
+Other parties, e.g. the Music app or just iOS as an Airplay sender, can also
+pair with devices/accesssories in a similar manner, but they are not full-
+fledged Homekit controllers and thus don't make requests for adding, removing
+or listing pairings.
+
+The controller uses `/pair-add` to make sure that all devices on a network get
+the ID and public key of all the other devices, so that the user only needs to
+pair a device once.
+
+### Normal pairing
+For a normal first-time pairing, the client needs a one-time code (the device
+announces via mDNS whether a code is required). The client calls
+`/pair-pin-start` and the device displays the code. There is also QR-based
+pairing, which is (probably?) an encoded code.
+
+After obtaining the code, the client initiates a three step `/pair-setup`
+sequence, which results in both peers registering each other's ID and public
+key. Henceforth, a pairing is verified with the two step `/pair-verify`, where
+the parties check each-others identify. Saving the peer's ID + public key isn't
+strictly necessary if client or server doesn't care about verifying the peer,
+i.e. that `/pair-setup` has actually been completed.
+
+The result of `/pair-verify` is a shared secret that is used for symmetric
+encryption of the following communinacation between the parties.
+
+### Transient pairing
+Some devices don't require a code from the user for pairing (e.g. an Airport
+Express 2). If so, the client just needs to go through a two-step `/pair-setup`
+sequence which results in a shared secret, which is then used for encrypted
+communication. A fixed code of 3939 is used.
+
+Such devices don't appear to be fully Homekit compatible - they will not, for
+instance - appear in the Home app.
+
+## "fruit" pairing
+Like normal Homekit pairing, this consists of first requesting a code with
+`/pair-pin-start`, then a three-step `/pair-setup` and finally a two-step
+`/pair-verify`. After that the communication is encrypted with the resulting
+shared secret.
+
+
 ## Acknowledgments
 - [AirPlayAuth](https://github.com/funtax/AirPlayAuth)
 - [AirPlayAuth-ObjC](https://github.com/ViktoriiaKh/AirPlayAuth-ObjC)
