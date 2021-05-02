@@ -27,18 +27,25 @@ enum pair_type
   // when session key is established
   PAIR_CLIENT_HOMEKIT_TRANSIENT,
   // Server side implementation supporting both transient and normal mode,
-  // letting client choose mode. However, if a PIN is with pair_setup_new()
-  // then only normal mode will be possible.
+  // letting client choose mode. If a PIN is with pair_setup_new() then only
+  // normal mode will be possible.
   PAIR_SERVER_HOMEKIT,
 };
 
-/* Stores the various forms of pairing results. The shared secret is used to
- * initialise an encrypted session via pair_cipher_new(). For non-transient
- * client pair setup, you should convert the result to a hex string with
- * pair_result_to_hex(), store it, and then initialise pair_verify_new() with it.
- * For non-transient server pair setup, store the client's id and public key
- * (e.g. in a database), and during pair-verify pass it back when requested by
- * the callback. Table showing returned data (everything else will be zeroed):
+/* This struct stores the various forms of pairing results. The shared secret
+ * is used to initialise an encrypted session via pair_cipher_new(). For
+ * non-transient client pair setup, you also get a key string (client_setup_keys) from
+ * pair_setup_result() that you can store and use to later initialise
+ * pair_verify_new(). For non-transient server pair setup, you can either:
+ *  - Register an "add pairing" callback (add_cb) with pair_setup_new(), and
+ *    then save the client id and key in the callback (see server-example.c for
+ *    this approach).
+ *  - Check pairing result with pair_setup_result() and if successful read and
+ *    store the client id and key from the result struct.
+ *  - Decide not to authenticate clients during pair-verify (set get_cb to NULL)
+ *    in which case you don't need to save client ids and keys from pair-setup.
+ *
+ * Table showing returned data (everything else will be zeroed):
  *
  *                                  | pair-setup                    | pair-verify
  *  --------------------------------|-------------------------------|--------------
@@ -72,11 +79,12 @@ typedef void (*pair_list_cb)(pair_cb list_cb, void *list_cb_arg, void *cb_arg);
 /* Client
  * When you have the pin-code (must be 4 chars), create a new context with this
  * function and then call pair_setup() or pair_setup_request1(). device_id is
- * only required for homekit pairing. If the client previously paired
+ * only required for Homekit pairing. If the client previously paired
  * (non-transient) and has saved credentials, it should instead skip setup and
  * only do verification. The callback is only for Homekit, and you can leave it
  * at NULL if you don't care about saving ID and key of the server for later
- * verification (then you also set get_cb to NULL in pair_verify_new).
+ * verification (then you also set get_cb to NULL in pair_verify_new), or if you
+ * will read the id and key via pair_setup_result.
  *
  * Server
  * The client will make a connection and then at some point make a /pair-setup
@@ -115,7 +123,7 @@ int
 pair_setup_result(const char **client_setup_keys, struct pair_result **result, struct pair_setup_context *sctx);
 
 /* These are for constructing specific message types and reading specific
- * message types. Not needed for Homekit pairing where you can use pair_setup().
+ * message types. Not needed for Homekit pairing if you use pair_setup().
  */
 uint8_t *
 pair_setup_request1(size_t *len, struct pair_setup_context *sctx);
@@ -137,8 +145,8 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *in, size_t 
 /* Client
  * When you have completed pair setup you get a string containing some keys
  * from pair_setup_result(). Give the string as input to this function to create
- * a verification context. Set the callback to NULL. Then call
- * pair_verify(). device_id is required for homekit pairing.
+ * a verification context. Set the callback to NULL. Then call pair_verify().
+ * The device_id is required for Homekit pairing.
  *
  * Server
  * When you get a pair verify request from a new peer, create a new context with
@@ -190,8 +198,9 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *in, size_
 
 /* ------------------------------- ciphering -------------------------------- */
 
-/* When you have completed the verification you can extract a key with
- * pair_verify_result(). Give the shared secret as input to this function to
+/* When you have completed the verification you can extract a shared secret with
+ * pair_verify_result() - or, in case of transient pairing, from
+ * pair_setup_result(). Give the shared secret as input to this function to
  * create a ciphering context.
  */
 struct pair_cipher_context *
@@ -230,6 +239,8 @@ pair_decrypt_rollback(struct pair_cipher_context *cctx);
 
 /* These are for Homekit pairing where they are called by the controller, e.g.
  * the Home app
+ *
+ * TODO this part is currenly not working
  */
 int
 pair_add(enum pair_type type, uint8_t **out, size_t *out_len, pair_cb add_cb, void *cb_arg, const uint8_t *in, size_t in_len);
