@@ -2,7 +2,7 @@
 C client implementation of pairing for:
 * Apple TV device verification, which became mandatory with tvOS 10.2 (this is
   called fruit mode in pair_ap)
-* Homekit pairing (for AirPlay 2)
+* Homekit pairing (for AirPlay 2, not working for Home app)
 
 Credit goes to @funtax and @ViktoriiaKh for doing some of the heavy lifting.
 ## Requirements
@@ -18,12 +18,11 @@ Since I haven't been able to find much information on the internet on how
 Homekit pairing is designed, here is a write-up of my current understanding. If
 you know better, please help improve this.
 
-With Homekit pairing, there may be a controller, which could for instance be the
-Home app, and then a number of devices/accessories, which could for instance be
-speakers. In the context of pair_ap, the controller is the client (since it is
-making the requests) and the device is the server. The controller can pair with
-devices, and after it is paired it can also add other "third-party" pairings to
-the device, it can remove pairings and it can ask for a list of pairings.
+With Homekit pairing, there may be a controller (e.g. the Home app), and a
+number of devices/accessories (e.g. speakers). The controller acts as a client
+and can make requests for pairing. After it is paired it can also add other
+"third-party" pairings to the device, it can remove pairings and it can ask for
+a list of pairings.
 
 Other parties, e.g. the Music app or just iOS as an Airplay sender, can also
 pair with devices/accesssories in a similar manner, but they are not full-
