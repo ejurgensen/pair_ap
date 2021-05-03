@@ -909,7 +909,7 @@ hkdf_extract_expand(uint8_t *okm, size_t okm_len, const uint8_t *ikm, size_t ikm
 }
 
 static int
-encrypt_chacha(uint8_t *cipher, uint8_t *plain, size_t plain_len, const uint8_t *key, size_t key_len, const void *ad, size_t ad_len, uint8_t *tag, size_t tag_len, const uint8_t nonce[NONCE_LENGTH])
+encrypt_chacha(uint8_t *cipher, const uint8_t *plain, size_t plain_len, const uint8_t *key, size_t key_len, const void *ad, size_t ad_len, uint8_t *tag, size_t tag_len, const uint8_t nonce[NONCE_LENGTH])
 {
 #ifdef CONFIG_OPENSSL
   EVP_CIPHER_CTX *ctx;
@@ -977,7 +977,7 @@ encrypt_chacha(uint8_t *cipher, uint8_t *plain, size_t plain_len, const uint8_t 
 }
 
 static int
-decrypt_chacha(uint8_t *plain, uint8_t *cipher, size_t cipher_len, const uint8_t *key, size_t key_len, const void *ad, size_t ad_len, uint8_t *tag, size_t tag_len, const uint8_t nonce[NONCE_LENGTH])
+decrypt_chacha(uint8_t *plain, const uint8_t *cipher, size_t cipher_len, const uint8_t *key, size_t key_len, const void *ad, size_t ad_len, uint8_t *tag, size_t tag_len, const uint8_t nonce[NONCE_LENGTH])
 {
 #ifdef CONFIG_OPENSSL
   EVP_CIPHER_CTX *ctx;
@@ -2854,11 +2854,11 @@ cipher_new(struct pair_definition *type, int channel, const uint8_t *shared_secr
 }
 
 static ssize_t
-encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx)
+encrypt(uint8_t **ciphertext, size_t *ciphertext_len, const uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx)
 {
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
-  uint8_t *plain_block;
+  const uint8_t *plain_block;
   uint8_t *cipher_block;
   uint16_t block_len;
   int nblocks;
@@ -2910,12 +2910,12 @@ encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t
 }
 
 static ssize_t
-decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx)
+decrypt(uint8_t **plaintext, size_t *plaintext_len, const uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx)
 {
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
   uint8_t *plain_block;
-  uint8_t *cipher_block;
+  const uint8_t *cipher_block;
   uint16_t block_len;
   int ret;
 

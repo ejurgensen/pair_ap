@@ -59,7 +59,12 @@ prompt_pin(void)
 static int
 response_process(uint8_t **response, struct evrtsp_request *req)
 {
-  if (req->response_code != 200)
+  if (!req)
+    {
+      printf("failed, could not read response\n");
+      return -1;
+    }
+  else if (req->response_code != 200)
     {
       printf("failed with error code %d: %s\n\n", req->response_code, req->response_code_line);
       return -1;
