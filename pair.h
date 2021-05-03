@@ -218,14 +218,14 @@ pair_cipher_errmsg(struct pair_cipher_context *cctx);
  * returned.
  */
 ssize_t
-pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
+pair_encrypt(uint8_t **ciphertext, size_t *ciphertext_len, const uint8_t *plaintext, size_t plaintext_len, struct pair_cipher_context *cctx);
 
 /* The return value equals length of ciphertext that was decrypted, so if the
  * return value == ciphertext_len then everything was decrypted. On error -1 is
  * returned.
  */
 ssize_t
-pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
+pair_decrypt(uint8_t **plaintext, size_t *plaintext_len, const uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
 
 /* Rolls back the nonce
  */
