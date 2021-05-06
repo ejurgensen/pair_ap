@@ -758,3 +758,14 @@ pair_state_get(enum pair_type type, const char **errmsg, const uint8_t *in, size
 
   return pair[type]->pair_state_get(errmsg, in, in_len);
 }
+
+void
+pair_public_key_get(enum pair_type type, uint8_t server_public_key[32], const char *device_id)
+{
+  if (!pair[type]->pair_public_key_get)
+    {
+      return;
+    }
+
+  pair[type]->pair_public_key_get(server_public_key, device_id);
+}

@@ -209,6 +209,7 @@ struct pair_definition
   ssize_t (*pair_decrypt)(uint8_t **plaintext, size_t *plaintext_len, const uint8_t *ciphertext, size_t ciphertext_len, struct pair_cipher_context *cctx);
 
   int (*pair_state_get)(const char **errmsg, const uint8_t *in, size_t in_len);
+  void (*pair_public_key_get)(uint8_t server_public_key[32], const char *device_id);
 };
 
 

@@ -257,4 +257,10 @@ pair_list(enum pair_type type, uint8_t **out, size_t *out_len, pair_list_cb list
 int
 pair_state_get(enum pair_type type, const char **errmsg, const uint8_t *in, size_t in_len);
 
+/* For servers, pair_ap calculates the public key using device_id as a seed.
+ * This function returns that public key.
+ */
+void
+pair_public_key_get(enum pair_type type, uint8_t server_public_key[32], const char *device_id);
+
 #endif  /* !__PAIR_AP_H__ */

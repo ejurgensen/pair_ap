@@ -2993,6 +2993,13 @@ state_get(const char **errmsg, const uint8_t *data, size_t data_len)
   return -1;
 }
 
+static void
+public_key_get(uint8_t server_public_key[crypto_sign_PUBLICKEYBYTES], const char *device_id)
+{
+  uint8_t private_key[crypto_sign_SECRETKEYBYTES];
+  server_keypair(server_public_key, private_key, device_id);
+}
+
 const struct pair_definition pair_client_homekit_normal =
 {
   .pair_setup_new = client_setup_new,
@@ -3086,4 +3093,5 @@ const struct pair_definition pair_server_homekit =
   .pair_decrypt = decrypt,
 
   .pair_state_get = state_get,
+  .pair_public_key_get = public_key_get,
 };
