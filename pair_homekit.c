@@ -1470,7 +1470,7 @@ client_setup_response2(struct pair_setup_context *handle, const uint8_t *data, s
       memcpy(handle->result.shared_secret, session_key, session_key_len);
       handle->result.shared_secret_len = session_key_len;
 
-      handle->setup_is_completed = 1;
+      handle->status = PAIR_STATUS_COMPLETED;
     }
 
   pair_tlv_free(response);
@@ -1589,7 +1589,7 @@ client_setup_response3(struct pair_setup_context *handle, const uint8_t *data, s
   if (sctx->add_cb)
     sctx->add_cb(handle->result.server_public_key, handle->result.device_id, sctx->add_cb_arg);
 
-  handle->setup_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
 
   free(decrypted_data);
   pair_tlv_free(response);
@@ -1898,7 +1898,7 @@ client_verify_response2(struct pair_verify_context *handle, const uint8_t *data,
   memcpy(handle->result.shared_secret, vctx->shared_secret, sizeof(vctx->shared_secret));
   handle->result.shared_secret_len = sizeof(vctx->shared_secret);
 
-  handle->verify_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
 
   return 0;
 }
@@ -1916,6 +1916,29 @@ server_keypair(uint8_t *public_key, uint8_t *private_key, const char *device_id)
 
   snprintf((char *)seed, sizeof(seed), "%s", device_id);
   crypto_sign_seed_keypair(public_key, private_key, seed);
+}
+
+static uint8_t *
+server_auth_failed_response(size_t *len, enum pair_keys msg_state)
+{
+  pair_tlv_values_t *response;
+  uint8_t *data;
+  size_t data_len;
+  uint8_t error = TLVError_Authentication;
+
+  data_len = REQUEST_BUFSIZE;
+  data = malloc(data_len);
+  response = pair_tlv_new();
+
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
+  pair_tlv_add_value(response, TLVType_Error, &error, sizeof(error));
+
+  pair_tlv_format(response, data, &data_len);
+  pair_tlv_free(response);
+
+  *len = data_len;
+
+  return data;
 }
 
 static int
@@ -1963,6 +1986,7 @@ static int
 server_setup_request1(struct pair_setup_context *handle, const uint8_t *data, size_t data_len)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+//  enum pair_keys msg_state = PAIR_SETUP_MSG01;
   pair_tlv_values_t *request;
   pair_tlv_t *method;
   pair_tlv_t *type;
@@ -1971,14 +1995,13 @@ server_setup_request1(struct pair_setup_context *handle, const uint8_t *data, si
   request = message_process(data, data_len, &handle->errmsg);
   if (!request)
     {
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   method = pair_tlv_get_value(request, TLVType_Method);
   if (!method || method->size != 1 || method->value[0] != 0)
     {
-      handle->errmsg = "Setup request 1: Missing or unexpected pairing method in TLV";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 1: Missing or unexpected pairing method in TLV");
     }
 
   type = pair_tlv_get_value(request, TLVType_Flags);
@@ -1989,16 +2012,14 @@ server_setup_request1(struct pair_setup_context *handle, const uint8_t *data, si
     &sctx->salt, &sctx->salt_len, &sctx->v, &sctx->v_len, NULL, NULL);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 1: Could not create verification key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 1: Could not create verification key");
     }
 
   ret = srp_verifier_start_authentication(HASH_SHA512, SRP_NG_3072, sctx->v, sctx->v_len,
     &sctx->b, &sctx->b_len, &sctx->pkB, &sctx->pkB_len, NULL, NULL);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 1: Could not compute B";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 1: Could not compute B");
     }
 
   pair_tlv_free(request);
@@ -2013,6 +2034,7 @@ static int
 server_setup_request2(struct pair_setup_context *handle, const uint8_t *data, size_t data_len)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+//  enum pair_keys msg_state = PAIR_SETUP_MSG03;
   pair_tlv_values_t *request;
   pair_tlv_t *pk;
   pair_tlv_t *proof;
@@ -2020,15 +2042,14 @@ server_setup_request2(struct pair_setup_context *handle, const uint8_t *data, si
   request = message_process(data, data_len, &handle->errmsg);
   if (!request)
     {
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   pk = pair_tlv_get_value(request, TLVType_PublicKey);
   proof = pair_tlv_get_value(request, TLVType_Proof);
   if (!pk || !proof)
     {
-      handle->errmsg = "Setup request 2: Missing pkA or proof";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 2: Missing pkA or proof");
     }
 
   sctx->pkA_len = pk->size; // 384
@@ -2043,18 +2064,19 @@ server_setup_request2(struct pair_setup_context *handle, const uint8_t *data, si
     sctx->pkA, sctx->pkA_len, sctx->b, sctx->b_len, sctx->pkB, sctx->pkB_len, NULL, NULL);
   if (!sctx->verifier)
     {
-      handle->errmsg = "Setup request 2: Incorrect verifier";
-      goto error;
+      handle->status = PAIR_STATUS_AUTH_FAILED;
+      goto out;
     }
 
   sctx->M2_len = 64; // 512 bit hash
   srp_verifier_verify_session(sctx->verifier, sctx->M1, &sctx->M2);
   if (!sctx->M2)
     {
-      handle->errmsg = "Setup request 2: Incorrect PIN (M2)";
-      goto error;
+      handle->status = PAIR_STATUS_AUTH_FAILED;
+      goto out; // Not an error, server should give proper TLV-formatet reply
     }
 
+ out:
   pair_tlv_free(request);
   return 0;
 
@@ -2067,6 +2089,7 @@ static int
 server_setup_request3(struct pair_setup_context *handle, const uint8_t *data, size_t data_len)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+  enum pair_keys msg_state = PAIR_SETUP_MSG05;
   pair_tlv_values_t *request;
   pair_tlv_t *encrypted_data;
   pair_tlv_t *device_id;
@@ -2085,62 +2108,56 @@ server_setup_request3(struct pair_setup_context *handle, const uint8_t *data, si
   request = message_process(data, data_len, &handle->errmsg);
   if (!request)
     {
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   session_key = srp_verifier_get_session_key(sctx->verifier, &session_key_len);
   if (!session_key)
     {
-      handle->errmsg = "Setup request 3: No valid session key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: No valid session key");
     }
 
-  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), session_key, session_key_len, PAIR_SETUP_MSG05);
+  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), session_key, session_key_len, msg_state);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 3: hkdf error getting derived_key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: hkdf error getting derived_key");
     }
 
   encrypted_data = pair_tlv_get_value(request, TLVType_EncryptedData);
   if (!encrypted_data)
     {
-      handle->errmsg = "Setup request 3: Missing encrypted_data";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: Missing encrypted_data");
     }
 
   // encrypted_data->value consists of the encrypted payload + the auth tag
   if (encrypted_data->size < AUTHTAG_LENGTH)
     {
-      handle->errmsg = "Setup request 3: Invalid encrypted data";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: Invalid encrypted data");
     }
 
   encrypted_len = encrypted_data->size - AUTHTAG_LENGTH;
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
-  memcpy(nonce + 4, pair_keys_map[PAIR_SETUP_MSG05].nonce, NONCE_LENGTH - 4);
+  memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   decrypted_data = malloc(encrypted_len);
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 3: Decryption error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: Decryption error");
     }
 
   pair_tlv_free(request);
   request = message_process(decrypted_data, encrypted_len, &handle->errmsg);
   if (!request)
     {
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   ret = hkdf_extract_expand(device_x, sizeof(device_x), session_key, session_key_len, PAIR_SETUP_CONTROLLER_SIGN);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 3: hkdf error getting device_x";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: hkdf error getting device_x");
     }
 
   device_id = pair_tlv_get_value(request, TLVType_Identifier);
@@ -2148,20 +2165,20 @@ server_setup_request3(struct pair_setup_context *handle, const uint8_t *data, si
   signature = pair_tlv_get_value(request, TLVType_Signature);
   if (!device_id || device_id->size >= sizeof(handle->result.device_id) || !pk || pk->size != crypto_sign_PUBLICKEYBYTES || !signature || signature->size != crypto_sign_BYTES)
     {
-      handle->errmsg = "Setup request 3: Missing/invalid device ID, public key or signature";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 3: Missing/invalid device ID, public key or signature");
     }
 
   ret = verify_info(signature->value, pk->value, device_x, sizeof(device_x), device_id->value, device_id->size, pk->value, pk->size);
   if (ret < 0)
     {
-      handle->errmsg = "Setup request 3: Invalid signature";
-      goto error;
+      handle->status = PAIR_STATUS_AUTH_FAILED;
+      goto out;
     }
 
   memcpy(handle->result.device_id, device_id->value, device_id->size);
   memcpy(handle->result.client_public_key, pk->value, pk->size);
 
+ out:
   free(decrypted_data);
   pair_tlv_free(request);
   return 0;
@@ -2176,24 +2193,27 @@ static uint8_t *
 server_setup_response1(size_t *len, struct pair_setup_context *handle)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+  enum pair_keys msg_state = PAIR_SETUP_MSG02;
   pair_tlv_values_t *response;
   uint8_t *data;
   size_t data_len;
   int ret;
 
+  if (handle->status == PAIR_STATUS_AUTH_FAILED)
+    return server_auth_failed_response(len, msg_state);
+
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   response = pair_tlv_new();
 
-  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG02].state, sizeof(pair_keys_map[PAIR_SETUP_MSG02].state));
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
   pair_tlv_add_value(response, TLVType_Salt, sctx->salt, sctx->salt_len); // 16
   pair_tlv_add_value(response, TLVType_PublicKey, sctx->pkB, sctx->pkB_len); // 384
 
   ret = pair_tlv_format(response, data, &data_len);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 1: pair_tlv_format returned an error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 1: pair_tlv_format returned an error");
     }
 
   *len = data_len;
@@ -2202,8 +2222,8 @@ server_setup_response1(size_t *len, struct pair_setup_context *handle)
   return data;
 
  error:
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2211,6 +2231,7 @@ static uint8_t *
 server_setup_response2(size_t *len, struct pair_setup_context *handle)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+  enum pair_keys msg_state = PAIR_SETUP_MSG04;
   pair_tlv_values_t *response;
   uint8_t *data;
   size_t data_len;
@@ -2218,18 +2239,20 @@ server_setup_response2(size_t *len, struct pair_setup_context *handle)
   int session_key_len;
   int ret;
 
+  if (handle->status == PAIR_STATUS_AUTH_FAILED)
+    return server_auth_failed_response(len, msg_state);
+
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   response = pair_tlv_new();
 
-  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG04].state, sizeof(pair_keys_map[PAIR_SETUP_MSG04].state));
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
   pair_tlv_add_value(response, TLVType_Proof, sctx->M2, sctx->M2_len); // 384
 
   ret = pair_tlv_format(response, data, &data_len);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 2: pair_tlv_format returned an error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 2: pair_tlv_format returned an error");
     }
 
   if (sctx->is_transient)
@@ -2237,8 +2260,7 @@ server_setup_response2(size_t *len, struct pair_setup_context *handle)
       session_key = srp_verifier_get_session_key(sctx->verifier, &session_key_len);
       if (!session_key)
         {
-	  handle->errmsg = "Setup request 2: Could not compute session key";
-	  goto error;
+	  RETURN_ERROR(PAIR_STATUS_INVALID, "Setup request 2: Could not compute session key");
 	}
 
       assert(sizeof(handle->result.shared_secret) >= session_key_len);
@@ -2246,7 +2268,7 @@ server_setup_response2(size_t *len, struct pair_setup_context *handle)
       memcpy(handle->result.shared_secret, session_key, session_key_len);
       handle->result.shared_secret_len = session_key_len;
 
-      handle->setup_is_completed = 1;
+      handle->status = PAIR_STATUS_COMPLETED;
     }
 
   *len = data_len;
@@ -2255,8 +2277,8 @@ server_setup_response2(size_t *len, struct pair_setup_context *handle)
   return data;
 
  error:
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2264,6 +2286,7 @@ static uint8_t *
 server_setup_response3(size_t *len, struct pair_setup_context *handle)
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
+  enum pair_keys msg_state = PAIR_SETUP_MSG06;
   const uint8_t *session_key;
   int session_key_len;
   pair_tlv_values_t *response;
@@ -2279,6 +2302,9 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
   uint8_t device_x[32];
   int ret;
 
+  if (handle->status == PAIR_STATUS_AUTH_FAILED)
+    return server_auth_failed_response(len, msg_state);
+
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   response = pair_tlv_new();
@@ -2286,22 +2312,19 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
   session_key = srp_verifier_get_session_key(sctx->verifier, &session_key_len);
   if (!session_key)
     {
-      handle->errmsg = "Setup response 3: No valid session key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: No valid session key");
     }
 
   ret = hkdf_extract_expand(device_x, sizeof(device_x), session_key, session_key_len, PAIR_SETUP_ACCESSORY_SIGN);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: hkdf error getting device_x";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: hkdf error getting device_x");
     }
 
   ret = create_and_sign_device_info(data, &data_len, sctx->device_id, device_x, sizeof(device_x), sctx->public_key, sizeof(sctx->public_key), sctx->private_key);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: create device info returned an error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: create device info returned an error");
     }
 
   // Append TLV-encoded public key to *data, which already has identifier and signature
@@ -2312,19 +2335,17 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
   pair_tlv_free(append);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: error appending public key to TLV";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: error appending public key to TLV");
     }
   data_len += append_len;
 
-  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), session_key, session_key_len, PAIR_SETUP_MSG06);
+  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), session_key, session_key_len, msg_state);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: hkdf error getting derived_key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: hkdf error getting derived_key");
     }
 
-  memcpy(nonce + 4, pair_keys_map[PAIR_SETUP_MSG06].nonce, NONCE_LENGTH - 4);
+  memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
   encrypted_data = malloc(encrypted_data_len);
@@ -2332,27 +2353,25 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: Could not encrypt";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: Could not encrypt");
     }
 
   memcpy(encrypted_data + data_len, tag, sizeof(tag));
 
-  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[PAIR_SETUP_MSG06].state, sizeof(pair_keys_map[PAIR_SETUP_MSG06].state));
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
   pair_tlv_add_value(response, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
 
   data_len = REQUEST_BUFSIZE; // Re-using *data, so pass original length to pair_tlv_format
   ret = pair_tlv_format(response, data, &data_len);
   if (ret < 0)
     {
-      handle->errmsg = "Setup response 3: error appending public key to TLV";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Setup response 3: error appending public key to TLV");
     }
 
   if (sctx->add_cb)
     sctx->add_cb(handle->result.client_public_key, handle->result.device_id, sctx->add_cb_arg);
 
-  handle->setup_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
 
   *len = data_len;
 
@@ -2362,8 +2381,8 @@ server_setup_response3(size_t *len, struct pair_setup_context *handle)
 
  error:
   free(encrypted_data);
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2397,20 +2416,20 @@ static int
 server_verify_request1(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
+//  enum pair_keys msg_state = PAIR_VERIFY_MSG01;
   pair_tlv_values_t *request;
   pair_tlv_t *pk;
 
   request = message_process(data, data_len, &handle->errmsg);
   if (!request)
     {
-      return -1;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   pk = pair_tlv_get_value(request, TLVType_PublicKey);
   if (!pk || pk->size != sizeof(vctx->client_eph_public_key))
     {
-      handle->errmsg = "Verify request 1: Missing or invalid public_key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 1: Missing or invalid public_key");
     }
 
   memcpy(vctx->client_eph_public_key, pk->value, sizeof(vctx->client_eph_public_key));
@@ -2427,6 +2446,7 @@ static int
 server_verify_request2(struct pair_verify_context *handle, const uint8_t *data, size_t data_len)
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
+  enum pair_keys msg_state = PAIR_VERIFY_MSG03;
   pair_tlv_values_t *request;
   pair_tlv_t *encrypted_data;
   pair_tlv_t *device_id;
@@ -2443,64 +2463,58 @@ server_verify_request2(struct pair_verify_context *handle, const uint8_t *data, 
   request = message_process(data, data_len, &handle->errmsg);
   if (!request)
     {
-      return -1;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
-  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), PAIR_VERIFY_MSG03);
+  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), msg_state);
   if (ret < 0)
     {
-      handle->errmsg = "Verify request 2: hkdf error getting derived_key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: hkdf error getting derived_key");
     }
 
   encrypted_data = pair_tlv_get_value(request, TLVType_EncryptedData);
   if (!encrypted_data)
     {
-      handle->errmsg = "Verify request 2: Missing encrypted_data";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: Missing encrypted_data");
     }
 
   // encrypted_data->value consists of the encrypted payload + the auth tag
   if (encrypted_data->size < AUTHTAG_LENGTH)
     {
-      handle->errmsg = "Verify request 2: Invalid encrypted data";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: Invalid encrypted data");
     }
 
   encrypted_len = encrypted_data->size - AUTHTAG_LENGTH;
   memcpy(tag, encrypted_data->value + encrypted_len, AUTHTAG_LENGTH);
-  memcpy(nonce + 4, pair_keys_map[PAIR_VERIFY_MSG03].nonce, NONCE_LENGTH - 4);
+  memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   decrypted_data = malloc(encrypted_len);
 
   ret = decrypt_chacha(decrypted_data, encrypted_data->value, encrypted_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      handle->errmsg = "Verify request 2: Decryption error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: Decryption error");
     }
 
   pair_tlv_free(request);
   request = message_process(decrypted_data, encrypted_len, &handle->errmsg);
   if (!request)
     {
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, handle->errmsg);
     }
 
   device_id = pair_tlv_get_value(request, TLVType_Identifier);
   signature = pair_tlv_get_value(request, TLVType_Signature);
   if (!device_id || !signature || signature->size != crypto_sign_BYTES)
     {
-      handle->errmsg = "Verify request 2: Missing identifier or signature";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: Missing identifier or signature");
     }
 
   if (vctx->verify_client_signature)
     {
       if (device_id->size >= sizeof(id_str))
         {
-          handle->errmsg = "Verify request 2: Device ID from peer is too long";
-          goto error;
+          RETURN_ERROR(PAIR_STATUS_INVALID, "Verify request 2: Device ID from peer is too long");
         }
 
       memcpy(id_str, device_id->value, device_id->size);
@@ -2508,19 +2522,20 @@ server_verify_request2(struct pair_verify_context *handle, const uint8_t *data, 
       ret = vctx->get_cb(client_public_key, id_str, vctx->get_cb_arg);
       if (ret < 0)
         {
-          handle->errmsg = "Verify request 2: Request from unknown device";
-          goto error;
+          handle->status = PAIR_STATUS_AUTH_FAILED;
+          goto out;
         }
 
       ret = verify_info(signature->value, client_public_key, vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key),
                         device_id->value, device_id->size, vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key));
       if (ret < 0)
         {
-          handle->errmsg = "Verify request 2: Invalid signature";
-          goto error;
+          handle->status = PAIR_STATUS_AUTH_FAILED;
+          goto out;
         }
     }
 
+ out:
   free(decrypted_data);
   pair_tlv_free(request);
   return 0;
@@ -2535,6 +2550,7 @@ static uint8_t *
 server_verify_response1(size_t *len, struct pair_verify_context *handle)
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
+  enum pair_keys msg_state = PAIR_VERIFY_MSG02;
   pair_tlv_values_t *response;
   uint8_t nonce[NONCE_LENGTH] = { 0 };
   uint8_t tag[AUTHTAG_LENGTH];
@@ -2545,6 +2561,9 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
   size_t data_len;
   int ret;
 
+  if (handle->status == PAIR_STATUS_AUTH_FAILED)
+    return server_auth_failed_response(len, msg_state);
+
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   response = pair_tlv_new();
@@ -2554,26 +2573,23 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
   ret = crypto_scalarmult(vctx->shared_secret, vctx->server_eph_private_key, vctx->client_eph_public_key);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 1: Error generating shared secret";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 1: Error generating shared secret");
     }
 
   ret = create_and_sign_accessory_info(data, &data_len, vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key), vctx->device_id,
                                        vctx->client_eph_public_key, sizeof(vctx->client_eph_public_key), vctx->server_private_key);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 1: Error creating device info";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 1: Error creating device info");
     }
 
-  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), PAIR_VERIFY_MSG02);
+  ret = hkdf_extract_expand(derived_key, sizeof(derived_key), vctx->shared_secret, sizeof(vctx->shared_secret), msg_state);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 1: hkdf error getting derived_key";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 1: hkdf error getting derived_key");
     }
 
-  memcpy(nonce + 4, pair_keys_map[PAIR_VERIFY_MSG02].nonce, NONCE_LENGTH - 4);
+  memcpy(nonce + 4, pair_keys_map[msg_state].nonce, NONCE_LENGTH - 4);
 
   encrypted_data_len = data_len + sizeof(tag); // Space for ciphered payload and authtag
   encrypted_data = malloc(encrypted_data_len);
@@ -2581,13 +2597,12 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
   ret = encrypt_chacha(encrypted_data, data, data_len, derived_key, sizeof(derived_key), NULL, 0, tag, sizeof(tag), nonce);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 1: Could not encrypt";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 1: Could not encrypt");
     }
 
   memcpy(encrypted_data + data_len, tag, sizeof(tag));
 
-  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG02].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG02].state));
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
   pair_tlv_add_value(response, TLVType_PublicKey, vctx->server_eph_public_key, sizeof(vctx->server_eph_public_key));
   pair_tlv_add_value(response, TLVType_EncryptedData, encrypted_data, encrypted_data_len);
 
@@ -2595,8 +2610,7 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
   ret = pair_tlv_format(response, data, &data_len);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 1: pair_tlv_format returned an error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 1: pair_tlv_format returned an error");
     }
 
   *len = data_len;
@@ -2607,8 +2621,8 @@ server_verify_response1(size_t *len, struct pair_verify_context *handle)
 
  error:
   free(encrypted_data);
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2616,22 +2630,25 @@ static uint8_t *
 server_verify_response2(size_t *len, struct pair_verify_context *handle)
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
+  enum pair_keys msg_state = PAIR_VERIFY_MSG04;
   pair_tlv_values_t *response;
   uint8_t *data;
   size_t data_len;
   int ret;
 
+  if (handle->status == PAIR_STATUS_AUTH_FAILED)
+    return server_auth_failed_response(len, msg_state);
+
   data_len = REQUEST_BUFSIZE;
   data = malloc(data_len);
   response = pair_tlv_new();
 
-  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[PAIR_VERIFY_MSG04].state, sizeof(pair_keys_map[PAIR_VERIFY_MSG04].state));
+  pair_tlv_add_value(response, TLVType_State, &pair_keys_map[msg_state].state, sizeof(pair_keys_map[msg_state].state));
 
   ret = pair_tlv_format(response, data, &data_len);
   if (ret < 0)
     {
-      handle->errmsg = "Verify response 2: pair_tlv_format returned an error";
-      goto error;
+      RETURN_ERROR(PAIR_STATUS_INVALID, "Verify response 2: pair_tlv_format returned an error");
     }
 
   *len = data_len;
@@ -2639,14 +2656,14 @@ server_verify_response2(size_t *len, struct pair_verify_context *handle)
   memcpy(handle->result.shared_secret, vctx->shared_secret, sizeof(vctx->shared_secret));
   handle->result.shared_secret_len = sizeof(vctx->shared_secret);
 
-  handle->verify_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
 
   pair_tlv_free(response);
   return data;
 
  error:
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2711,8 +2728,8 @@ server_add_remove_response(size_t *len)
   return data;
 
  error:
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2771,8 +2788,8 @@ server_list_response(size_t *len, pair_list_cb cb, void *cb_arg)
   return data;
 
  error:
-  pair_tlv_free(response);
   free(data);
+  pair_tlv_free(response);
   return NULL;
 }
 
@@ -2969,6 +2986,11 @@ state_get(const char **errmsg, const uint8_t *data, size_t data_len)
   pair_tlv_values_t *message;
   pair_tlv_t *state;
   int ret;
+
+  if (!data || data_len == 0)
+    {
+      return 0; // state 0 = no incoming data yet -> first request
+    }
 
   message = message_process(data, data_len, errmsg);
   if (!message)

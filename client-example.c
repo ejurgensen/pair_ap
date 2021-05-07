@@ -66,7 +66,7 @@ response_process(uint8_t **response, struct evrtsp_request *req)
     }
   else if (req->response_code != 200)
     {
-      printf("failed with error code %d: %s\n\n", req->response_code, req->response_code_line);
+      printf("failed with error code %d: %s (body is %zu bytes)\n\n", req->response_code, req->response_code_line, evbuffer_get_length(req->input_buffer));
       return -1;
     }
 

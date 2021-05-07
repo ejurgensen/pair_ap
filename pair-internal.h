@@ -4,6 +4,10 @@
 
 #include "pair.h"
 
+#define RETURN_ERROR(s, m) \
+  do { handle->status = (s); handle->errmsg = (m); goto error; } while(0)
+
+
 struct SRPUser;
 struct SRPVerifier;
 
@@ -79,11 +83,19 @@ struct pair_server_setup_context
   int salt_len;
 };
 
+enum pair_status
+{
+  PAIR_STATUS_IN_PROGRESS,
+  PAIR_STATUS_COMPLETED,
+  PAIR_STATUS_AUTH_FAILED,
+  PAIR_STATUS_INVALID,
+};
+
 struct pair_setup_context
 {
   struct pair_definition *type;
 
-  int setup_is_completed;
+  enum pair_status status;
   const char *errmsg;
 
   struct pair_result result;
@@ -145,7 +157,7 @@ struct pair_verify_context
 {
   struct pair_definition *type;
 
-  int verify_is_completed;
+  enum pair_status status;
   const char *errmsg;
 
   struct pair_result result;

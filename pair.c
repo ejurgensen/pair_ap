@@ -317,7 +317,7 @@ pair_setup_errmsg(struct pair_setup_context *sctx)
 int
 pair_setup(uint8_t **out, size_t *out_len, struct pair_setup_context *sctx, const uint8_t *in, size_t in_len)
 {
-  int state = 1;
+  int state;
   int ret = -1;
 
   if (!sctx->type->pair_state_get)
@@ -329,49 +329,49 @@ pair_setup(uint8_t **out, size_t *out_len, struct pair_setup_context *sctx, cons
   *out = NULL;
   *out_len = 0;
 
-  if (in)
-    {
-
-      state = sctx->type->pair_state_get(&sctx->errmsg, in, in_len);
-      if (state < 0)
-        return -1;
-    }
+  state = sctx->type->pair_state_get(&sctx->errmsg, in, in_len);
+  if (state < 0)
+    return -1;
 
   switch (state)
     {
+      case 0:
+        *out = pair_setup_request1(out_len, sctx);
+        break;
       case 1:
-        if (in && (ret = pair_setup_response1(sctx, in, in_len)) < 0)
+        ret = pair_setup_response1(sctx, in, in_len);
+        if (ret < 0)
           break;
         *out = pair_setup_request1(out_len, sctx);
         break;
       case 2:
         ret = pair_setup_response1(sctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_setup_request2(out_len, sctx);
         break;
       case 3:
         ret = pair_setup_response2(sctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_setup_request2(out_len, sctx);
         break;
       case 4:
         ret = pair_setup_response2(sctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_setup_request3(out_len, sctx);
         break;
       case 5:
         ret = pair_setup_response3(sctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_setup_request3(out_len, sctx);
         break;
       case 6:
         ret = pair_setup_response3(sctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         break;
       default:
         sctx->errmsg = "Setup: Unsupported state";
@@ -462,7 +462,7 @@ pair_setup_response3(struct pair_setup_context *sctx, const uint8_t *in, size_t 
 int
 pair_setup_result(const char **client_setup_keys, struct pair_result **result, struct pair_setup_context *sctx)
 {
-  if (!sctx->setup_is_completed)
+  if (sctx->status != PAIR_STATUS_COMPLETED)
     {
       sctx->errmsg = "Setup result: Pair setup has not been completed";
       return -1;
@@ -525,7 +525,7 @@ pair_verify_errmsg(struct pair_verify_context *vctx)
 int
 pair_verify(uint8_t **out, size_t *out_len, struct pair_verify_context *vctx, const uint8_t *in, size_t in_len)
 {
-  int state = 1;
+  int state;
   int ret = -1;
 
   if (!vctx->type->pair_state_get)
@@ -537,37 +537,37 @@ pair_verify(uint8_t **out, size_t *out_len, struct pair_verify_context *vctx, co
   *out = NULL;
   *out_len = 0;
 
-  if (in)
-    {
-
-      state = vctx->type->pair_state_get(&vctx->errmsg, in, in_len);
-      if (state < 0)
-        return -1;
-    }
+  state = vctx->type->pair_state_get(&vctx->errmsg, in, in_len);
+  if (state < 0)
+    return -1;
 
   switch (state)
     {
+      case 0:
+        *out = pair_verify_request1(out_len, vctx);
+        break;
       case 1:
-        if (in && (ret = pair_verify_response1(vctx, in, in_len)) < 0)
+        ret = pair_verify_response1(vctx, in, in_len);
+        if (ret < 0)
           break;
         *out = pair_verify_request1(out_len, vctx);
         break;
       case 2:
         ret = pair_verify_response1(vctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_verify_request2(out_len, vctx);
         break;
       case 3:
         ret = pair_verify_response2(vctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         *out = pair_verify_request2(out_len, vctx);
         break;
       case 4:
         ret = pair_verify_response2(vctx, in, in_len);
         if (ret < 0)
-	  break;
+          break;
         break;
       default:
         vctx->errmsg = "Verify: Unsupported state";
@@ -634,7 +634,7 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *in, size_
 int
 pair_verify_result(struct pair_result **result, struct pair_verify_context *vctx)
 {
-  if (!vctx->verify_is_completed)
+  if (vctx->status != PAIR_STATUS_COMPLETED)
     {
       vctx->errmsg = "Verify result: The pairing verification did not complete";
       return -1;

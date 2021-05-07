@@ -845,7 +845,7 @@ client_setup_response3(struct pair_setup_context *handle, const uint8_t *data, s
   memcpy(handle->result.client_private_key, sctx->private_key, sizeof(sctx->private_key));
   memcpy(handle->result.client_public_key, sctx->public_key, sizeof(sctx->public_key));
 
-  handle->setup_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
   return 0;
 }
 
@@ -1033,7 +1033,7 @@ client_verify_response2(struct pair_verify_context *handle, const uint8_t *data,
   memcpy(handle->result.shared_secret, vctx->shared_secret, sizeof(vctx->shared_secret));
   handle->result.shared_secret_len = sizeof(vctx->shared_secret);
 
-  handle->verify_is_completed = 1;
+  handle->status = PAIR_STATUS_COMPLETED;
 
   return 0;
 }
