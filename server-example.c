@@ -125,7 +125,7 @@ encryption_enable(struct connection_ctx *conn_ctx, const uint8_t *shared_secret,
 }
 
 static int
-encrypt(struct evbuffer *output, uint8_t *in, size_t in_len, struct connection_ctx *conn_ctx)
+buffer_encrypt(struct evbuffer *output, uint8_t *in, size_t in_len, struct connection_ctx *conn_ctx)
 {
   uint8_t *out;
   size_t out_len;
@@ -144,7 +144,7 @@ encrypt(struct evbuffer *output, uint8_t *in, size_t in_len, struct connection_c
 }
 
 static int
-decrypt(struct evbuffer *output, struct evbuffer *input, struct connection_ctx *conn_ctx)
+buffer_decrypt(struct evbuffer *output, struct evbuffer *input, struct connection_ctx *conn_ctx)
 {
   uint8_t *in;
   size_t in_len;
@@ -443,7 +443,7 @@ handle_options(struct evbuffer *output, struct connection_ctx *conn_ctx, struct 
   plain = evbuffer_pullup(response, -1);
   plain_len = evbuffer_get_length(response);
 
-  ret = encrypt(output, plain, plain_len, conn_ctx);
+  ret = buffer_encrypt(output, plain, plain_len, conn_ctx);
 
   evbuffer_free(response);
   return ret;
@@ -555,7 +555,7 @@ in_read_cb(struct bufferevent *bev, void *arg)
 
   if (conn_ctx->pair_completed)
     {
-      decrypt(conn_ctx->pending, input, conn_ctx);
+      buffer_decrypt(conn_ctx->pending, input, conn_ctx);
     }
   else
     {
