@@ -924,7 +924,7 @@ encrypt_chacha(uint8_t *cipher, const uint8_t *plain, size_t plain_len, const ui
   if (EVP_CIPHER_CTX_set_padding(ctx, 0) != 1) // Maybe not necessary
     goto error;
 
-  if (EVP_EncryptUpdate(ctx, NULL, &len, ad, ad_len) != 1)
+  if (ad_len > 0 && EVP_EncryptUpdate(ctx, NULL, &len, ad, ad_len) != 1)
     goto error;
 
   if (EVP_EncryptUpdate(ctx, cipher, &len, plain, plain_len) != 1)
@@ -956,7 +956,7 @@ encrypt_chacha(uint8_t *cipher, const uint8_t *plain, size_t plain_len, const ui
   if (gcry_cipher_setiv(hd, nonce, NONCE_LENGTH) != GPG_ERR_NO_ERROR)
     goto error;
 
-  if (gcry_cipher_authenticate(hd, ad, ad_len) != GPG_ERR_NO_ERROR)
+  if (ad_len > 0 && gcry_cipher_authenticate(hd, ad, ad_len) != GPG_ERR_NO_ERROR)
     goto error;
 
   if (gcry_cipher_encrypt(hd, cipher, plain_len, plain, plain_len) != GPG_ERR_NO_ERROR)
@@ -995,13 +995,11 @@ decrypt_chacha(uint8_t *plain, const uint8_t *cipher, size_t cipher_len, const u
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, tag_len, tag) != 1)
     goto error;
 
-  if (EVP_DecryptUpdate(ctx, NULL, &len, ad, ad_len) != 1)
+  if (ad_len > 0 && EVP_DecryptUpdate(ctx, NULL, &len, ad, ad_len) != 1)
     goto error;
 
   if (EVP_DecryptUpdate(ctx, plain, &len, cipher, cipher_len) != 1)
     goto error;
-
-  assert(len == cipher_len);
 
   if (EVP_DecryptFinal_ex(ctx, NULL, &len) != 1)
     goto error;
@@ -1024,7 +1022,7 @@ decrypt_chacha(uint8_t *plain, const uint8_t *cipher, size_t cipher_len, const u
   if (gcry_cipher_setiv(hd, nonce, NONCE_LENGTH) != GPG_ERR_NO_ERROR)
     goto error;
 
-  if (gcry_cipher_authenticate(hd, ad, ad_len) != GPG_ERR_NO_ERROR)
+  if (ad_len > 0 && gcry_cipher_authenticate(hd, ad, ad_len) != GPG_ERR_NO_ERROR)
     goto error;
 
   if (gcry_cipher_decrypt(hd, plain, cipher_len, cipher, cipher_len) != GPG_ERR_NO_ERROR)
