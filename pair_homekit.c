@@ -1911,8 +1911,14 @@ static void
 server_keypair(uint8_t *public_key, uint8_t *private_key, const char *device_id)
 {
   uint8_t seed[crypto_sign_SEEDBYTES] = { 0 };
+  size_t len;
 
-  snprintf((char *)seed, sizeof(seed), "%s", device_id);
+  len = strlen(device_id);
+  if (len > sizeof(seed))
+    len = sizeof(seed);
+
+  memcpy(seed, device_id, len);
+
   crypto_sign_seed_keypair(public_key, private_key, seed);
 }
 
