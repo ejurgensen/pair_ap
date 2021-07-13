@@ -2757,9 +2757,12 @@ static int
 server_list_cb(uint8_t public_key[crypto_sign_PUBLICKEYBYTES], const char *device_id, void *cb_arg)
 {
   pair_tlv_values_t *response = cb_arg;
+  uint8_t permissions = 1; // Means admin (TODO don't hardcode - let caller set)
 
   pair_tlv_add_value(response, TLVType_Identifier, (unsigned char *)device_id, strlen(device_id));
   pair_tlv_add_value(response, TLVType_PublicKey, public_key, crypto_sign_PUBLICKEYBYTES);
+  pair_tlv_add_value(response, TLVType_Permissions, &permissions, sizeof(permissions));
+
   return 0;
 }
 
