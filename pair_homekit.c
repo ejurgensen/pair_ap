@@ -2679,6 +2679,7 @@ server_add_remove_request(pair_cb cb, void *cb_arg, const uint8_t *in, size_t in
   pair_tlv_t *device_id;
   pair_tlv_t *pk;
   char id_str[PAIR_AP_DEVICE_ID_LEN_MAX] = { 0 };
+  uint8_t *public_key = NULL;
 
   request = message_process(in, in_len, &errmsg);
   if (!request)
@@ -2687,15 +2688,21 @@ server_add_remove_request(pair_cb cb, void *cb_arg, const uint8_t *in, size_t in
     }
 
   device_id = pair_tlv_get_value(request, TLVType_Identifier);
-  pk = pair_tlv_get_value(request, TLVType_PublicKey);
-  if (!device_id || device_id->size >= sizeof(id_str) || !pk || pk->size != crypto_sign_PUBLICKEYBYTES)
+  if (!device_id || device_id->size >= sizeof(id_str))
     {
       goto error;
     }
 
+  // Only present when adding
+  pk = pair_tlv_get_value(request, TLVType_PublicKey);
+  if (pk && pk->size == crypto_sign_PUBLICKEYBYTES)
+    {
+      public_key = pk->value;
+    }
+
   memcpy(id_str, device_id->value, device_id->size);
 
-  cb(pk->value, id_str, cb_arg);
+  cb(public_key, id_str, cb_arg);
 
   pair_tlv_free(request);
   return 0;
