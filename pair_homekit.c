@@ -2764,7 +2764,13 @@ static int
 server_list_cb(uint8_t public_key[crypto_sign_PUBLICKEYBYTES], const char *device_id, void *cb_arg)
 {
   pair_tlv_values_t *response = cb_arg;
+  pair_tlv_t *previous_id;
   uint8_t permissions = 1; // Means admin (TODO don't hardcode - let caller set)
+
+  // If this isn't the first iteration (item) then we must add a separator
+  previous_id = pair_tlv_get_value(response, TLVType_Identifier);
+  if (previous_id)
+    pair_tlv_add_value(response, TLVType_Separator, NULL, 0);
 
   pair_tlv_add_value(response, TLVType_Identifier, (unsigned char *)device_id, strlen(device_id));
   pair_tlv_add_value(response, TLVType_PublicKey, public_key, crypto_sign_PUBLICKEYBYTES);
