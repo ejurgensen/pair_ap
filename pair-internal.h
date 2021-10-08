@@ -225,6 +225,12 @@ struct pair_definition
 };
 
 
+/* ----------------------------- INITIALIZATION ---------------------------- */
+
+bool
+is_initialized(void);
+
+
 /* -------------------- GCRYPT AND OPENSSL COMPABILITY --------------------- */
 /*                   partly borrowed from ffmpeg (rtmpdh.c)                  */
 

@@ -44,6 +44,27 @@ static struct pair_definition *pair[] = {
     &pair_server_homekit,
 };
 
+/* ------------------------------ INITIALIZATION ---------------------------- */
+
+bool
+is_initialized(void)
+{
+  if (sodium_init() == -1)
+    return false;
+
+#if CONFIG_GCRYPT
+  // According to libgcrypt documentation: "It is important that these
+  // initialization steps are not done by a library but by the actual
+  // application. A library using Libgcrypt might want to check for finished
+  // initialization using:"
+  if (!gcry_control (GCRYCTL_INITIALIZATION_FINISHED_P))
+    return false;
+#endif
+
+  return true;
+}
+
+
 /* -------------------------- SHARED HASHING HELPERS ------------------------ */
 
 int

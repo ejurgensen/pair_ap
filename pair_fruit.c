@@ -601,7 +601,7 @@ client_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (!pin || strlen(pin) < 4)
@@ -876,7 +876,7 @@ client_verify_new(struct pair_verify_context *handle, const char *client_setup_k
   const char *ptr;
   int i;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (!client_setup_keys)

@@ -1137,7 +1137,7 @@ client_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add
 {
   struct pair_client_setup_context *sctx = &handle->sctx.client;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (handle->type == &pair_client_homekit_normal)
@@ -1626,7 +1626,7 @@ client_verify_new(struct pair_verify_context *handle, const char *client_setup_k
   struct pair_client_verify_context *vctx = &handle->vctx.client;
   size_t hexkey_len;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (!device_id || strlen(device_id) >= PAIR_AP_DEVICE_ID_LEN_MAX)
@@ -1950,7 +1950,7 @@ server_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add
 {
   struct pair_server_setup_context *sctx = &handle->sctx.server;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (!pin)
@@ -2396,7 +2396,7 @@ server_verify_new(struct pair_verify_context *handle, const char *client_setup_k
 {
   struct pair_server_verify_context *vctx = &handle->vctx.server;
 
-  if (sodium_init() == -1)
+  if (!is_initialized())
     return -1;
 
   if (client_setup_keys)
