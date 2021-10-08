@@ -37,6 +37,10 @@
 
 #include "pair.h"
 
+#ifdef CONFIG_GCRYPT
+# include <gcrypt.h>
+#endif
+
 #define DEVICE_ID "FFEEDDCCBBAA9988"
 #define LISTEN_PORT 7000
 #define CONTENT_TYPE_OCTET "application/octet-stream"
@@ -667,6 +671,17 @@ main(int argc, char * argv[])
 {
   struct event_base *evbase;
   struct evconnlistener *listener;
+
+// libgcrypt requires that the application initializes the library
+#ifdef CONFIG_GCRYPT
+  if (!gcry_check_version(NULL))
+    {
+      printf("libgcrypt not initialized\n");
+      return -1;
+    }
+  gcry_control(GCRYCTL_DISABLE_SECMEM, 0);
+  gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
+#endif
 
   evbase = event_base_new();
 

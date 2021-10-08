@@ -9,6 +9,10 @@
 #include "evrtsp/evrtsp.h"
 #include "pair.h"
 
+#ifdef CONFIG_GCRYPT
+# include <gcrypt.h>
+#endif
+
 #define DEVICE_ID "AABBCCDD11223344"
 #define ACTIVE_REMOTE "3515324763"
 #define DACP_ID "FF1DB45949E6CBD3"
@@ -552,6 +556,17 @@ main( int argc, char * argv[] )
       endpoint_setup = ENDPOINT_SETUP_HOMEKIT;
       content_type_setup = CONTENTTYPE_SETUP_HOMEKIT;
     }
+
+// libgcrypt requires that the application initializes the library
+#ifdef CONFIG_GCRYPT
+  if (!gcry_check_version(NULL))
+    {
+      printf("libgcrypt not initialized\n");
+      return -1;
+    }
+  gcry_control(GCRYCTL_DISABLE_SECMEM, 0);
+  gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
+#endif
 
   evbase = event_base_new();
   evcon = evrtsp_connection_new(address, atoi(port));
