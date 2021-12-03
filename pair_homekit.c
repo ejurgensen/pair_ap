@@ -1163,6 +1163,11 @@ client_setup_new(struct pair_setup_context *handle, const char *pin, pair_cb add
 
   crypto_sign_keypair(sctx->public_key, sctx->private_key);
 
+#ifdef DEBUG_PAIR
+  hexdump("Client public key:\n", sctx->public_key, sizeof(sctx->public_key));
+  hexdump("Client private key:\n", sctx->private_key, sizeof(sctx->private_key));
+#endif
+
   return 0;
 }
 
