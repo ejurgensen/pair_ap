@@ -384,4 +384,7 @@ hash_num(enum hash_alg alg, const bnum n, unsigned char *dest);
 #ifdef DEBUG_PAIR
 void
 hexdump(const char *msg, uint8_t *mem, size_t len);
+
+void
+bnum_dump(const char *msg, bnum n);
 #endif

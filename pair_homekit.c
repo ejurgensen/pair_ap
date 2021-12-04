@@ -409,8 +409,11 @@ static void
 srp_user_start_authentication(struct SRPUser *usr, const char **username,
                               const unsigned char **bytes_A, int *len_A)
 {
-  bnum_random(usr->a, 256);
 //  BN_hex2bn(&(usr->a), "D929DFB605687233C9E9030C2280156D03BDB9FDCF3CCE3BC27D9CCFCB5FF6A1");
+  bnum_random(usr->a, 256);
+#ifdef DEBUG_PAIR
+  bnum_dump("Random value of usr->a:\n", usr->a);
+#endif
 
   bnum_modexp(usr->A, usr->ng->g, usr->a, usr->ng->N);
     
@@ -538,6 +541,9 @@ srp_create_salted_verification_key(enum hash_alg alg,
     goto error;
 
   bnum_random(s, 128); // MODIFIED from csrp's BN_rand(s, 32, -1, 0)
+#ifdef DEBUG_PAIR
+  bnum_dump("Random value of s:\n", s);
+#endif
 
   x = calculate_x(alg, s, username, password, len_password);
   if (!x)
@@ -602,6 +608,9 @@ srp_verifier_start_authentication(enum hash_alg alg, SRP_NGType ng_type,
   bnum_bin2bn(v, bytes_v, len_v);
 
   bnum_random(b, 256); // MODIFIED from BN_rand(b, 256, -1, 0)
+#ifdef DEBUG_PAIR
+  bnum_dump("Random value of b:\n", b);
+#endif
 
   k = H_nn_pad(alg, ng->N, ng->g, ng->N_len); // MODIFIED from H_nn(alg, ng->N, ng->g)
   if (!k)

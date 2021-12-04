@@ -293,6 +293,16 @@ hexdump(const char *msg, uint8_t *mem, size_t len)
 	}
     }
 }
+
+void
+bnum_dump(const char *msg, bnum n)
+{
+  int len_n = bnum_num_bytes(n);
+  uint8_t *bin = calloc(1, len_n);
+  bnum_bn2bin(n, bin, len_n);
+  hexdump(msg, bin, len_n);
+  free(bin);
+}
 #endif
 
 
