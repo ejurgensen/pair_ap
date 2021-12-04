@@ -142,6 +142,7 @@ typedef struct
 {
   bnum N;
   bnum g;
+  int N_len;
 } NGConstant;
 
 struct SRPUser
@@ -232,6 +233,8 @@ new_ng(SRP_NGType ng_type, const char *n_hex, const char *g_hex)
 
   bnum_hex2bn(ng->N, n_hex);
   bnum_hex2bn(ng->g, g_hex);
+
+  ng->N_len = bnum_num_bytes(ng->N);
 
   return ng;
 }
@@ -443,7 +446,7 @@ srp_user_process_challenge(struct SRPUser *usr, const unsigned char *bytes_s, in
 
   bnum_bin2bn(s, bytes_s, len_s);
   bnum_bin2bn(B, bytes_B, len_B);
-  k    = H_nn_pad(usr->alg, usr->ng->N, usr->ng->g);
+  k    = H_nn_pad(usr->alg, usr->ng->N, usr->ng->g, usr->ng->N_len);
 
   bnum_new(v);
   bnum_new(tmp1);
@@ -453,7 +456,7 @@ srp_user_process_challenge(struct SRPUser *usr, const unsigned char *bytes_s, in
   if (!s || !B || !k || !v || !tmp1 || !tmp2 || !tmp3)
     goto cleanup1;
 
-  u = H_nn_pad(usr->alg, usr->A, B);
+  u = H_nn_pad(usr->alg, usr->A, B, usr->ng->N_len);
   x = calculate_x(usr->alg, s, usr->username, usr->password, usr->password_len);
   if (!u || !x)
     goto cleanup2;
@@ -600,7 +603,7 @@ srp_verifier_start_authentication(enum hash_alg alg, SRP_NGType ng_type,
 
   bnum_random(b, 256); // MODIFIED from BN_rand(b, 256, -1, 0)
 
-  k = H_nn_pad(alg, ng->N, ng->g); // MODIFIED from H_nn(alg, ng->N, ng->g)
+  k = H_nn_pad(alg, ng->N, ng->g, ng->N_len); // MODIFIED from H_nn(alg, ng->N, ng->g)
   if (!k)
     goto error;
 
@@ -708,8 +711,8 @@ srp_verifier_new(enum hash_alg alg, SRP_NGType ng_type, const char *username,
   if (bnum_is_zero(tmp1))
     goto error;
 
-  k = H_nn_pad(alg, ng->N, ng->g); // MODIFIED from H_nn(alg, ng->N, ng->g)
-  u = H_nn_pad(alg, A, B); // MODIFIED from H_nn(alg, A, B)
+  k = H_nn_pad(alg, ng->N, ng->g, ng->N_len); // MODIFIED from H_nn(alg, ng->N, ng->g)
+  u = H_nn_pad(alg, A, B, ng->N_len); // MODIFIED from H_nn(alg, A, B)
 
   // S = (A *(v^u)) ^ b
   bnum_modexp(tmp1, v, u, ng->N);

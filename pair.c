@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h> // for isprint()
+#include <assert.h>
 
 #include <sodium.h>
 
@@ -188,24 +189,27 @@ hash_ab(enum hash_alg alg, unsigned char *md, const unsigned char *m1, int m1_le
   return hash_final(alg, &ctx, md);
 }
 
+// See rfc5054 PAD()
 bnum
-H_nn_pad(enum hash_alg alg, const bnum n1, const bnum n2)
+H_nn_pad(enum hash_alg alg, const bnum n1, const bnum n2, int padded_len)
 {
   bnum          bn;
   unsigned char *bin;
   unsigned char buff[SHA512_DIGEST_LENGTH];
   int           len_n1 = bnum_num_bytes(n1);
   int           len_n2 = bnum_num_bytes(n2);
-  int           nbytes = 2 * len_n1;
+  int           nbytes = 2 * padded_len;
+  int           offset_n1 = padded_len - len_n1;
+  int           offset_n2 = nbytes - len_n2;
 
-  if ((len_n2 < 1) || (len_n2 > len_n1))
-    return 0;
+  assert(len_n1 <= padded_len);
+  assert(len_n2 <= padded_len);
 
-  bin = calloc( 1, nbytes );
+  bin = calloc(1, nbytes);
 
-  bnum_bn2bin(n1, bin, len_n1);
-  bnum_bn2bin(n2, bin + nbytes - len_n2, len_n2);
-  hash( alg, bin, nbytes, buff );
+  bnum_bn2bin(n1, bin + offset_n1, len_n1);
+  bnum_bn2bin(n2, bin + offset_n2, len_n2);
+  hash(alg, bin, nbytes, buff);
   free(bin);
   bnum_bin2bn(bn, buff, hash_length(alg));
   return bn;
@@ -221,8 +225,8 @@ H_ns(enum hash_alg alg, const bnum n, const unsigned char *bytes, int len_bytes)
   unsigned char *bin   = malloc(nbytes);
 
   bnum_bn2bin(n, bin, len_n);
-  memcpy( bin + len_n, bytes, len_bytes );
-  hash( alg, bin, nbytes, buff );
+  memcpy(bin + len_n, bytes, len_bytes);
+  hash(alg, bin, nbytes, buff);
   free(bin);
   bnum_bin2bn(bn, buff, hash_length(alg));
   return bn;
