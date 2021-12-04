@@ -108,7 +108,7 @@ make_request(const char *url, const void *data, size_t len, const char *content_
   else if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT)
     evrtsp_add_header(req->output_headers, "X-Apple-HKP", "4");
 
-  printf("Making request %d to '%s'... ", cseq, url);
+  printf("Making request %d to '%s' (len %zu)... ", cseq, url, len);
 
   return evrtsp_make_request(evcon, req, EVRTSP_REQ_POST, url);
 }
@@ -136,7 +136,7 @@ make_request_options(const char *url, const void *data, size_t len, const char *
 //  evrtsp_add_header(req->output_headers, "Active-Remote", ACTIVE_REMOTE);
   evrtsp_add_header(req->output_headers, "X-Apple-HKP", "3");
 
-  printf("Making request %d to '%s'... ", cseq, url);
+  printf("Making request %d to '%s' (len %zu)... ", cseq, url, len);
 
   return evrtsp_make_request(evcon, req, EVRTSP_REQ_OPTIONS, url);
 }
