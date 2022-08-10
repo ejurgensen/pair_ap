@@ -45,17 +45,20 @@ static char *
 prompt_pin(void)
 {
   char *pin = NULL;
-  size_t len;
+  ssize_t len;
+  size_t sz;
 
   printf ("Enter pin: ");
   fflush (stdout);
 
-  len = getline(&pin, &len, stdin);
-  if (len != 5) // Includes EOL
+  len = getline(&pin, &sz, stdin);
+  if (len < 1)
     {
-      printf ("Bad pin length %zu\n", len);
+      printf("Bad pin entered (len=%zd)\n", len);
       return NULL;
     }
+
+  pin[len - 1] = '\0'; // Zero the EOL
 
   return pin;
 }
