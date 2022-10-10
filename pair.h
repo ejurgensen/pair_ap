@@ -20,15 +20,15 @@ enum pair_type
   // This is the pairing type required for Apple TV device verification, which
   // became mandatory with tvOS 10.2.
   PAIR_CLIENT_FRUIT,
-  // This is the Homekit type required for AirPlay 2 with both PIN setup and
-  // verification
+  // This is the Homekit type required for AirPlay 2 with both PIN/password
+  // setup and verification
   PAIR_CLIENT_HOMEKIT_NORMAL,
   // Same as normal except PIN is fixed to 3939 and stops after setup step 2,
   // when session key is established
   PAIR_CLIENT_HOMEKIT_TRANSIENT,
   // Server side implementation supporting both transient and normal mode,
-  // letting client choose mode. If a PIN is with pair_setup_new() then only
-  // normal mode will be possible.
+  // letting client choose mode. If a PIN/password is set with pair_setup_new()
+  // then only normal mode will be possible.
   PAIR_SERVER_HOMEKIT,
 };
 
@@ -77,7 +77,7 @@ typedef void (*pair_list_cb)(pair_cb list_cb, void *list_cb_arg, void *cb_arg);
 /* ------------------------------- pair setup ------------------------------- */
 
 /* Client
- * When you have the pin-code (must be 4 chars), create a new context with this
+ * When you have the PIN or password, create a new context with this
  * function and then call pair_setup() or pair_setup_request1(). device_id is
  * only required for Homekit pairing. If the client previously paired
  * (non-transient) and has saved credentials, it should instead skip setup and
@@ -89,9 +89,9 @@ typedef void (*pair_list_cb)(pair_cb list_cb, void *list_cb_arg, void *cb_arg);
  * Server
  * The client will make a connection and then at some point make a /pair-setup
  * or a /pair-verify. The server should:
- *   - new /pair-setup: create a setup context with a pin-code (or NULL to allow
- *     transient pairing), and then call pair_setup() to process request and
- *     construct reply (also for subsequent /pair-setup requests)
+ *   - new /pair-setup: create a setup context with a PIN/password (or NULL to
+ *     allow transient pairing), and then call pair_setup() to process request
+ *     and construct reply (also for subsequent /pair-setup requests)
  *   - new /pair_verify: create a verify context and then call pair_verify()
  *     to process request and construct reply (also for subsequent /pair-verify
  *     requests)
