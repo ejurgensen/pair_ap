@@ -17,6 +17,7 @@
 #define ACTIVE_REMOTE "3515324763"
 #define DACP_ID "FF1DB45949E6CBD3"
 #define USER_AGENT "AirPlay/381.13"
+#define CLIENT_NAME "Client Example"
 
 #define ENDPOINT_SETUP_FRUIT "/pair-setup-pin"
 #define CONTENTTYPE_SETUP_FRUIT "application/x-apple-binary-plist"
@@ -110,6 +111,8 @@ make_request(const char *url, const void *data, size_t len, const char *content_
     evrtsp_add_header(req->output_headers, "X-Apple-HKP", "3");
   else if (pair_type == PAIR_CLIENT_HOMEKIT_TRANSIENT)
     evrtsp_add_header(req->output_headers, "X-Apple-HKP", "4");
+
+  evrtsp_add_header(req->output_headers, "X-Apple-Client-Name", CLIENT_NAME);
 
   printf("Making request %d to '%s' (len %zu)... ", cseq, url, len);
 
@@ -519,7 +522,7 @@ setup_start_response(struct evrtsp_request *req, void *arg)
 static int
 setup_start_request(void)
 {
-  return make_request("/pair-pin-start", NULL, 0, "application/x-apple-binary-plist", setup_start_response);
+  return make_request("/pair-pin-start", NULL, 0, NULL, setup_start_response);
 }
 
 
