@@ -338,12 +338,7 @@ enum hash_alg
 #endif
 
 #if CONFIG_OPENSSL
-typedef union
-{
-  SHA_CTX    sha;
-  SHA256_CTX sha256;
-  SHA512_CTX sha512;
-} HashCTX;
+typedef struct { EVP_MD_CTX *evp; } HashCTX;
 #elif CONFIG_GCRYPT
 typedef gcry_md_hd_t HashCTX;
 #endif
