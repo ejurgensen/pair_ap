@@ -850,7 +850,9 @@ message_process(const uint8_t *data, size_t data_len, const char **errmsg)
   error = pair_tlv_get_value(response, TLVType_Error);
   if (error)
     {
-      if (error->value[0] == TLVError_Authentication)
+      if (error->size == 0)
+	*errmsg = "Device returned an empty error";
+      else if (error->value[0] == TLVError_Authentication)
 	*errmsg = "Device returned an authentication failure";
       else if (error->value[0] == TLVError_Backoff)
 	*errmsg = "Device told us to back off pairing attempts\n";
