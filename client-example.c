@@ -220,7 +220,7 @@ verify_step2_response(struct evrtsp_request *req, void *arg)
   if (ret < 0)
     goto error;
 
-  cipher_ctx = pair_cipher_new(pair_type, 0, result->shared_secret, result->shared_secret_len);
+  cipher_ctx = pair_cipher_new(pair_type, PAIR_CHANNEL_CONTROL, result->shared_secret, result->shared_secret_len, NULL);
   if (!cipher_ctx)
     goto error;
 
@@ -391,7 +391,7 @@ setup_step2_response(struct evrtsp_request *req, void *arg)
       if (ret < 0)
 	goto error;
 
-      cipher_ctx = pair_cipher_new(pair_type, 0, result->shared_secret, result->shared_secret_len);
+      cipher_ctx = pair_cipher_new(pair_type, PAIR_CHANNEL_CONTROL, result->shared_secret, result->shared_secret_len, NULL);
       if (!cipher_ctx)
 	goto error;
 

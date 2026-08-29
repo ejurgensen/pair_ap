@@ -118,7 +118,7 @@ response_create_from_raw(struct evbuffer *response, uint8_t *body, size_t body_l
 static int
 encryption_enable(struct connection_ctx *conn_ctx, const uint8_t *shared_secret, size_t shared_secret_len)
 {
-  conn_ctx->cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT, 2, shared_secret, shared_secret_len);
+  conn_ctx->cipher_ctx = pair_cipher_new(PAIR_SERVER_HOMEKIT, PAIR_CHANNEL_CONTROL, shared_secret, shared_secret_len, NULL);
   if (!conn_ctx->cipher_ctx)
     {
       printf("Error setting up ciphering\n");

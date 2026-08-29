@@ -686,12 +686,12 @@ pair_verify_result(struct pair_result **result, struct pair_verify_context *vctx
 }
 
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, int channel, const uint8_t *shared_secret, size_t shared_secret_len)
+pair_cipher_new(enum pair_type type, enum pair_channel channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *salt_suffix)
 {
   if (!pair[type]->pair_cipher_new)
     return NULL;
 
-  return pair[type]->pair_cipher_new(pair[type], channel, shared_secret, shared_secret_len);
+  return pair[type]->pair_cipher_new(pair[type], channel, shared_secret, shared_secret_len, salt_suffix);
 }
 
 void

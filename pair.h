@@ -32,6 +32,13 @@ enum pair_type
   PAIR_SERVER_HOMEKIT,
 };
 
+enum pair_channel
+{
+  PAIR_CHANNEL_CONTROL,
+  PAIR_CHANNEL_EVENTS,
+  PAIR_CHANNEL_DATA,
+};
+
 /* This struct stores the various forms of pairing results. The shared secret
  * is used to initialise an encrypted session via pair_cipher_new(). For
  * non-transient client pair setup, you also get a key string (client_setup_keys) from
@@ -202,9 +209,15 @@ pair_verify_response2(struct pair_verify_context *vctx, const uint8_t *in, size_
  * pair_verify_result() - or, in case of transient pairing, from
  * pair_setup_result(). Give the shared secret as input to this function to
  * create a ciphering context.
+ *
+ * The salt_suffix is for data channels (used for Media Remote Protocol). It's
+ * the seed (64 bit) from the response to SETUP. It shall always be treated as
+ * an unsigned integer (%llu), so -3431997079003895594 would be salt_suffix =
+ * "15014746994705656022". If you provide this, the salt will become
+ * "DataStream-Salt15014746994705656022".
  */
 struct pair_cipher_context *
-pair_cipher_new(enum pair_type type, int channel, const uint8_t *shared_secret, size_t shared_secret_len);
+pair_cipher_new(enum pair_type type, enum pair_channel channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *salt_suffix);
 void
 pair_cipher_free(struct pair_cipher_context *cctx);
 

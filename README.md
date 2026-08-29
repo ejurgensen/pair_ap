@@ -71,3 +71,4 @@ shared secret.
 - [ap2-sender](https://github.com/ViktoriiaKh/ap2-sender)
 - [airplay2-receiver](https://github.com/ckdo/airplay2-receiver)
 - [csrp](https://github.com/cocagne/csrp)
+- [pyatv](https://pyatv.dev/documentation/protocols/#remote-control)

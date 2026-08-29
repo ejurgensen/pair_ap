@@ -75,6 +75,8 @@ enum pair_keys
   PAIR_CONTROL_READ,
   PAIR_EVENTS_WRITE,
   PAIR_EVENTS_READ,
+  PAIR_DATA_WRITE,
+  PAIR_DATA_READ,
 };
 
 struct pair_keys_map
@@ -110,6 +112,10 @@ static struct pair_keys_map pair_keys_map[] =
   // Encryption/decryption of event channel
   { 0, "Events-Salt", "Events-Write-Encryption-Key", "" },
   { 0, "Events-Salt", "Events-Read-Encryption-Key", "" },
+
+  // Encryption/decryption of data channel
+  { 0, "DataStream-Salt", "DataStream-Output-Encryption-Key", "" },
+  { 0, "DataStream-Salt", "DataStream-Input-Encryption-Key", "" },
 };
 
 enum pair_method {
@@ -2944,37 +2950,47 @@ cipher_free(struct pair_cipher_context *cctx)
 }
 
 static struct pair_cipher_context *
-cipher_new(struct pair_definition *type, int channel, const uint8_t *shared_secret, size_t shared_secret_len)
+cipher_new(struct pair_definition *type, enum pair_channel channel, const uint8_t *shared_secret, size_t shared_secret_len, const char *salt_suffix)
 {
-  struct pair_cipher_context *cctx;
-  enum pair_keys write_key;
-  enum pair_keys read_key;
-  const char *salt;
-  const char *info;
+  struct pair_cipher_context *cctx = NULL;
+  bool is_client;
+  enum pair_keys key_encrypt;
+  enum pair_keys key_decrypt;
+  char salt_encrypt[256];
+  char salt_decrypt[256];
+  const char *info_encrypt;
+  const char *info_decrypt;
   int ret;
+
+  is_client = (type == &pair_client_homekit_normal || type == &pair_client_homekit_transient);
 
   // Note that events is opposite, probably because it is a reverse connection
   switch (channel)
     {
-      case 0:
-	write_key = PAIR_CONTROL_WRITE;
-	read_key = PAIR_CONTROL_READ;
+      case PAIR_CHANNEL_CONTROL:
+	key_encrypt = is_client ? PAIR_CONTROL_WRITE : PAIR_CONTROL_READ;
+	key_decrypt = is_client ? PAIR_CONTROL_READ : PAIR_CONTROL_WRITE;
 	break;
-      case 1:
-	write_key = PAIR_EVENTS_READ;
-	read_key = PAIR_EVENTS_WRITE;
+      case PAIR_CHANNEL_EVENTS:
+	key_encrypt = is_client ? PAIR_EVENTS_READ : PAIR_EVENTS_WRITE;
+	key_decrypt = is_client ? PAIR_EVENTS_WRITE : PAIR_EVENTS_READ;
 	break;
-      case 2:
-	write_key = PAIR_CONTROL_READ;
-	read_key = PAIR_CONTROL_WRITE;
+      case PAIR_CHANNEL_DATA:
+	key_encrypt = is_client ? PAIR_DATA_WRITE : PAIR_DATA_READ;
+	key_decrypt = is_client ? PAIR_DATA_READ : PAIR_DATA_WRITE;
 	break;
-      case 3:
-	write_key = PAIR_EVENTS_WRITE;
-	read_key = PAIR_EVENTS_READ;
-	break;
-      default:
-	return NULL;
     }
+
+  ret = snprintf(salt_encrypt, sizeof(salt_encrypt), "%s%s", pair_keys_map[key_encrypt].salt, salt_suffix ? salt_suffix : "");
+  if (ret < 0 || ret >= sizeof(salt_encrypt))
+    goto error;
+
+  ret = snprintf(salt_decrypt, sizeof(salt_decrypt), "%s%s", pair_keys_map[key_decrypt].salt, salt_suffix ? salt_suffix : "");
+  if (ret < 0 || ret >= sizeof(salt_decrypt))
+    goto error;
+
+  info_encrypt = pair_keys_map[key_encrypt].info;
+  info_decrypt = pair_keys_map[key_decrypt].info;
 
   cctx = calloc(1, sizeof(struct pair_cipher_context));
   if (!cctx)
@@ -2982,24 +2998,18 @@ cipher_new(struct pair_definition *type, int channel, const uint8_t *shared_secr
 
   cctx->type = type;
 
-  salt = pair_keys_map[write_key].salt;
-  info = pair_keys_map[write_key].info;
-
-  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, shared_secret_len, salt, info);
+  ret = hkdf_extract_expand(cctx->encryption_key, sizeof(cctx->encryption_key), shared_secret, shared_secret_len, salt_encrypt, info_encrypt);
   if (ret < 0)
     goto error;
 
-  salt = pair_keys_map[read_key].salt;
-  info = pair_keys_map[read_key].info;
-
-  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, shared_secret_len, salt, info);
+  ret = hkdf_extract_expand(cctx->decryption_key, sizeof(cctx->decryption_key), shared_secret, shared_secret_len, salt_decrypt, info_decrypt);
   if (ret < 0)
     goto error;
 
   return cctx;
 
  error:
-  pair_cipher_free(cctx);
+  cipher_free(cctx);
   return NULL;
 }
 
